@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Checklist de Pré-Instalação ECTAS</title>
+<meta name="theme-color" content="#002B49">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Checklist ECTAS">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<header class="band" id="topo">
+  <div class="wrap top">
+    <button type="button" class="voltar" id="b-voltar" aria-label="Voltar" hidden>‹</button>
+    <div class="logo" id="logo-box"><img src="logo.png" alt="ECTAS Saneamento"></div>
+    <div class="ttl">
+      <h1 id="h-titulo">Checklist de Pré-Instalação</h1>
+      <p id="h-sub">Obras</p>
+    </div>
+  </div>
+  <div class="stripe"></div>
+  <div class="sync wrap" id="sync" role="status"></div>
+</header>
+<main><div class="wrap" id="main"><p class="vazio">Carregando…</p></div></main>
+<div id="fab"></div>
+<script src="config.js?v=1"></script>
+<script src="lib/jspdf.umd.min.js" defer></script>
+<script src="lib/xlsx.full.min.js" defer></script>
+<script src="app.js?v=1" defer></script>
+</body>
+</html>
