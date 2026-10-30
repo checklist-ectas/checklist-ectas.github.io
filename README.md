@@ -1,6 +1,10 @@
 # Checklist de Pré-Instalação ECTAS
 
-App: **https://checklist-ectas.github.io**
+- **Equipe de campo:** https://checklist-ectas.github.io/campo
+- **Supervisor:** https://checklist-ectas.github.io/supervisor
+
+O painel do supervisor é só de consulta: obras, liberação para mobilização, itens em aberto, fotos e resultados mês a mês com o total do ano.
+Com a central ligada, ele lê a planilha da central (pede a senha do supervisor). Sem a central, importa os arquivos Excel exportados pelo app de campo.
 
 Checklist de pré-instalação preenchido no celular pela equipe de campo: status de cada item, responsável, prazos, observações e fotos.
 Mostra se a obra está **LIBERADA** para mobilização (todos os itens da etapa Mobilização concluídos ou não aplicáveis).
@@ -14,7 +18,7 @@ A central é um Google Apps Script (`central-Code.gs.txt`) que guarda tudo na pl
 "Checklist de Pré-Instalação ECTAS - Base" e as fotos no Google Drive.
 
 1. Em script.google.com, crie um projeto novo e cole o conteúdo de `central-Code.gs.txt`.
-2. Troque `CODIGO_EQUIPE` pelo código que a equipe vai usar.
+2. Troque `CODIGO_EQUIPE` (código da equipe de campo) e `SENHA_SUPERVISOR` (senha do painel).
 3. Rode `configurar` e autorize.
 4. Implantar > Nova implantação > App da Web · Executar como: Eu · Acesso: Qualquer pessoa.
 5. Cole o URL em `config.js` (`window.CENTRAL={url:"..."}`) e publique.

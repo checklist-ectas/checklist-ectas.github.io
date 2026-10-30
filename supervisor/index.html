@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Painel do Supervisor - Checklist ECTAS</title>
+<meta name="theme-color" content="#002B49">
+<meta name="robots" content="noindex">
+<link rel="icon" href="../icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="../style.css?v=1">
+<style>
+.wrap{max-width:1180px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px}
+.kpi b{display:block;font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+.kpi.bad b{color:var(--bad)} .kpi.ok b{color:var(--ok)} .kpi.warn b{color:var(--warn)} .kpi.mob b{color:var(--mob)}
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line)}
+.tabs button{border:none;background:none;padding:10px 14px;font-weight:700;color:var(--muted);border-bottom:3px solid transparent;margin-bottom:-1px}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--azul)}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--marinho);color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em;text-align:left;padding:9px 10px;white-space:nowrap;position:sticky;top:0}
+td{padding:9px 10px;border-top:1px solid var(--line);vertical-align:top}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tr.click{cursor:pointer} tr.click:hover td{background:var(--surface2)}
+tr.tot td{font-weight:800;background:var(--surface2)}
+.mini{display:inline-block;width:70px;height:6px;border-radius:9px;background:var(--surface2);vertical-align:middle;margin-left:6px;overflow:hidden}
+.mini i{display:block;height:100%;background:linear-gradient(90deg,var(--azul),var(--teal))}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bar .grow{flex:1}
+select.ano{padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-weight:700}
+.det{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;font-size:13px}
+.det dt{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.det dd{margin:0 0 6px}
+@media (max-width:640px){.det{grid-template-columns:1fr}}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.thumbs .ph{width:64px;height:64px;font-size:9px}
+.legenda{display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legenda i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+svg text{fill:var(--muted);font-family:var(--font);font-size:11px}
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:22px;text-align:center;color:var(--muted)}
+.drop.on{border-color:var(--azul);background:var(--surface2)}
+</style>
+</head>
+<body>
+<header class="band">
+  <div class="wrap top">
+    <div class="logo"><img src="../logo.png" alt="ECTAS Saneamento"></div>
+    <div class="ttl"><h1>Painel do Supervisor</h1><p id="fonte">Checklist de Pré-Instalação</p></div>
+    <span id="acoes" class="row"></span>
+  </div>
+  <div class="stripe"></div>
+</header>
+<main><div class="wrap" id="main" style="padding-block:18px 60px;display:flex;flex-direction:column;gap:16px"><p class="vazio">Carregando…</p></div></main>
+<script src="../config.js?v=1"></script>
+<script src="../lib/xlsx.full.min.js"></script>
+<script src="painel.js?v=1"></script>
+</body>
+</html>

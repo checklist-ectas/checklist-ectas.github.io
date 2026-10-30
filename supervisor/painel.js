@@ -1,0 +1,258 @@
+/* Painel do Supervisor - Checklist de Pré-Instalação ECTAS
+   Só leitura. Lê a central (Google Apps Script) com a senha do supervisor,
+   ou, enquanto a central não estiver ligada, os arquivos Excel enviados pela equipe. */
+"use strict";
+const CENTRAL = window.CENTRAL || { url: "" };
+const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const ler = (k, p) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? p : v; } catch (e) { return p; } };
+const gravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } };
+let D = ler("sup-dados", { obras: {}, itens: [], fonte: "", em: null });   // dados em uso
+let SENHA = ler("sup-senha", "");
+const UI = { aba: "obras", filtro: "ativas", busca: "", ano: new Date().getFullYear(), obra: null, carregando: false, erro: "" };
+
+const $ = s => document.querySelector(s);
+const h = (tag, a = {}, ...kids) => { const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(a || {})) { if (v == null || v === false) continue;
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (k === "text") e.textContent = v; else e.setAttribute(k, v === true ? "" : v); }
+  for (const k of kids.flat()) { if (k == null || k === false) continue; e.append(k.nodeType ? k : document.createTextNode(String(k))); }
+  return e; };
+const hoje = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+const fmt = d => d ? d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4) : "";
+const dias = (a, b) => Math.round((new Date(a + "T12:00") - new Date(b + "T12:00")) / 864e5);
+const pct = x => Math.round(x * 100) + "%";
+
+/* ---------- regras (as mesmas do app e da planilha) ---------- */
+const itensAtivos = () => (D.itens || []).filter(i => i.ativo !== false);
+const reg = (o, c) => (o.checklist || {})[c] || {};
+function situacaoPrazo(r) { const s = r.status || "Pendente";
+  if (s === "Não aplicável") return "N/A";
+  if (s === "Concluído") return (!r.prev || !r.concl) ? "Concluído" : r.concl <= r.prev ? "Concluído no prazo" : "Concluído com atraso";
+  if (!r.prev) return "Sem data prevista"; return r.prev < hoje() ? "Atrasado" : "No prazo"; }
+function resumo(o) { let apl = 0, conc = 0, pendMob = 0, atras = 0, and = 0;
+  for (const it of itensAtivos()) { const r = reg(o, it.codigo), s = r.status || "Pendente";
+    if (s !== "Não aplicável") apl++; if (s === "Concluído") conc++; if (s === "Em andamento") and++;
+    if (it.etapa === "Mobilização" && s !== "Concluído" && s !== "Não aplicável") pendMob++;
+    if (situacaoPrazo(r) === "Atrasado") atras++; }
+  const lib = o.dataRealMob ? { t: "MOBILIZADA", c: "p-mob" } : pendMob === 0 ? { t: "LIBERADA", c: "p-ok" } : { t: "NÃO LIBERADA", c: "p-bad" };
+  return { apl, conc, and, pendMob, atras, pct: apl ? conc / apl : 0, lib }; }
+const obras = () => Object.values(D.obras || {}).sort((a, b) => (a.previsaoMob || "9999").localeCompare(b.previsaoMob || "9999"));
+const encerrada = o => ["Instalação concluída", "Cancelada"].includes(o.situacao);
+
+/* ---------- fontes de dados ---------- */
+async function api(corpo) {
+  const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...corpo, senha: SENHA }) });
+  const j = await r.json(); if (!j.ok) { const e = new Error(j.erro || "erro"); e.senha = j.erro === "senha"; throw e; } return j; }
+async function carregarCentral() {
+  UI.carregando = true; UI.erro = ""; render();
+  try { const r = await api({ acao: "supCarregar" }); const ob = {}; for (const o of r.obras || []) ob[o.id] = o;
+    D = { obras: ob, itens: r.itens || [], fonte: "central", em: new Date().toISOString(), planilha: r.planilha || "" }; gravar("sup-dados", D);
+  } catch (e) { if (e.senha) { SENHA = ""; gravar("sup-senha", ""); UI.erro = "Senha incorreta."; } else UI.erro = "Não foi possível falar com a central. Mostrando os últimos dados carregados."; }
+  UI.carregando = false; render(); }
+
+const dIso = v => { if (v instanceof Date && !isNaN(v)) return v.getFullYear() + "-" + String(v.getMonth() + 1).padStart(2, "0") + "-" + String(v.getDate()).padStart(2, "0");
+  const s = String(v || "").trim(); let m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/); if (m) return `${m[3]}-${m[2]}-${m[1]}`; m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : ""; };
+const tIso = v => v instanceof Date && !isNaN(v) ? v.toISOString() : (String(v || "") ? new Date(v).toISOString() : "");
+async function importar(arquivos) {
+  let nObras = 0, nItens = 0; const base = D.fonte === "arquivos" ? D : { obras: {}, itens: [], fonte: "arquivos" };
+  const cat = new Map((base.itens || []).map(i => [i.codigo, i]));
+  for (const f of arquivos) {
+    try {
+      const wb = XLSX.read(await f.arrayBuffer(), { cellDates: true });
+      const so = wb.Sheets["OBRAS"], sr = wb.Sheets["REGISTRO"];
+      if (!so || !sr) { UI.erro = `O arquivo ${f.name} não é uma exportação do app (faltam as abas OBRAS e REGISTRO).`; continue; }
+      for (const r of XLSX.utils.sheet_to_json(so, { defval: "" })) { const id = String(r["ID Obra"] || "").trim().toUpperCase(); if (!id) continue;
+        const o = base.obras[id] || (base.obras[id] = { id, checklist: {} }); nObras++;
+        const map = { nome: "Obra / Empreendimento", cliente: "Cliente", cidade: "Cidade/UF", modelo: "Modelo / Tipo de ETE", respEctas: "Responsável ECTAS", contato: "Contato do cliente", telefone: "Telefone / E-mail", situacao: "Situação da obra", obs: "Observações gerais" };
+        for (const [k, c] of Object.entries(map)) if (String(r[c] || "").trim()) o[k] = String(r[c]).trim();
+        for (const [k, c] of [["dataVerificacao", "Data da verificação"], ["previsaoMob", "Previsão de mobilização"], ["dataRealMob", "Data real de mobilização"]]) if (dIso(r[c])) o[k] = dIso(r[c]); }
+      for (const r of XLSX.utils.sheet_to_json(sr, { defval: "" })) { const id = String(r["ID Obra"] || "").trim().toUpperCase(), cod = String(r["Código item"] || "").trim(); if (!id || !cod) continue;
+        if (!cat.has(cod)) cat.set(cod, { codigo: cod, categoria: r["Categoria"], item: r["Item de verificação"], etapa: r["Etapa limite"] || "Mobilização", ativo: true });
+        const o = base.obras[id] || (base.obras[id] = { id, checklist: {} });
+        const novo = { status: r["Status"] || "Pendente", parte: r["Parte responsável"], resp: r["Responsável (nome)"], prev: dIso(r["Data prevista"]), concl: dIso(r["Data conclusão"]),
+          link: r["Evidência (link foto/doc)"], obs: r["Observações / Pendências"], em: tIso(r["Última atualização"]), por: r["Atualizado por"] || "" };
+        const velho = o.checklist[cod];
+        if (!velho || (novo.em && (!velho.em || novo.em > velho.em)) || (!velho.em && !novo.em)) { o.checklist[cod] = novo; nItens++; } }
+    } catch (e) { UI.erro = `Não foi possível ler ${f.name}.`; }
+  }
+  D = { ...base, itens: [...cat.values()], em: new Date().toISOString() }; gravar("sup-dados", D);
+  if (!UI.erro) toast(`${arquivos.length} arquivo(s) importado(s): ${Object.keys(D.obras).length} obra(s) no painel.`);
+  render(); }
+function toast(m) { const t = h("div", { class: "toast", role: "status", text: m }); document.body.append(t); setTimeout(() => t.remove(), 3200); }
+
+/* ---------- telas ---------- */
+function topo() {
+  $("#fonte").textContent = D.fonte === "central" ? "Dados da central · " + (D.em ? new Date(D.em).toLocaleString("pt-BR") : "")
+    : D.fonte === "arquivos" ? "Dados dos arquivos importados" : "Checklist de Pré-Instalação";
+  const ac = [];
+  if (CENTRAL.url && SENHA) ac.push(h("button", { class: "acao", onclick: carregarCentral }, UI.carregando ? "Atualizando…" : "Atualizar"));
+  if (D.fonte) ac.push(h("button", { class: "acao", onclick: exportar }, "Exportar Excel"));
+  $("#acoes").replaceChildren(...ac); }
+
+function render() {
+  topo();
+  const m = $("#main");
+  if (CENTRAL.url && !SENHA) return telaSenha(m);
+  const kids = [];
+  if (UI.erro) kids.push(h("div", { class: "notice warn", text: UI.erro }));
+  if (!CENTRAL.url) kids.push(blocoImportar());
+  if (!D.fonte || !Object.keys(D.obras).length) {
+    kids.push(h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra no painel ainda" }),
+      h("p", { text: CENTRAL.url ? "Assim que a equipe sincronizar, as obras aparecem aqui." : "Importe os arquivos Excel enviados pela equipe (botão Exportar do app de campo)." })));
+    m.replaceChildren(...kids); return; }
+  if (UI.obra && D.obras[UI.obra]) { m.replaceChildren(...kids, telaObra(D.obras[UI.obra])); return; }
+  kids.push(kpis());
+  kids.push(h("div", { class: "tabs", role: "tablist" }, [["obras", "Obras"], ["mes", "Mês a mês"]].map(([k, t]) =>
+    h("button", { role: "tab", "aria-selected": String(UI.aba === k), onclick: () => { UI.aba = k; render(); } }, t))));
+  kids.push(UI.aba === "mes" ? telaMes() : telaObras());
+  m.replaceChildren(...kids); }
+
+function telaSenha(m) {
+  const msg = h("p", { class: "meta", text: UI.erro });
+  m.replaceChildren(h("form", { class: "card ent", onsubmit: async e => { e.preventDefault(); SENHA = $("#s-senha").value; msg.textContent = "Conferindo…";
+      try { await api({ acao: "supPing" }); gravar("sup-senha", SENHA); UI.erro = ""; carregarCentral(); }
+      catch (err) { SENHA = ""; msg.textContent = err.senha ? "Senha incorreta." : "Sem conexão com a central."; } } },
+    h("h2", { text: "Acesso do supervisor" }), h("p", { class: "meta", text: "Digite a senha do supervisor definida na central." }),
+    h("label", { class: "f" }, "Senha", h("input", { id: "s-senha", type: "password", required: true, autocomplete: "current-password" })),
+    h("button", { class: "btn", type: "submit" }, "Entrar"), msg)); }
+
+function blocoImportar() {
+  const inp = h("input", { type: "file", id: "imp", accept: ".xlsx", multiple: true, hidden: true, onchange: e => { const f = [...e.target.files]; e.target.value = ""; if (f.length) importar(f); } });
+  const box = h("label", { class: "drop", for: "imp" }, h("b", { text: "Importar Excel da equipe" }), h("br"),
+    h("span", { class: "meta", text: "Arraste aqui ou clique para escolher. Pode importar vários arquivos de uma vez; vale a atualização mais recente de cada item." }), inp);
+  box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("on"); });
+  box.addEventListener("dragleave", () => box.classList.remove("on"));
+  box.addEventListener("drop", e => { e.preventDefault(); box.classList.remove("on"); const f = [...e.dataTransfer.files].filter(x => /\.xlsx$/i.test(x.name)); if (f.length) importar(f); });
+  return h("div", { style: "display:flex;flex-direction:column;gap:6px" }, box,
+    D.fonte === "arquivos" ? h("button", { class: "more", style: "align-self:flex-end", onclick: () => { D = { obras: {}, itens: [], fonte: "" }; gravar("sup-dados", D); render(); } }, "Limpar dados importados") : null); }
+
+function kpis() {
+  const lista = obras().filter(o => !encerrada(o)), rs = lista.map(resumo);
+  const c = (n, t, cls) => h("div", { class: "kpi " + (cls || "") }, h("b", { text: n }), h("span", { text: t }));
+  return h("div", { class: "kpis" },
+    c(lista.length, "Obras ativas"), c(rs.filter(r => r.lib.t === "NÃO LIBERADA").length, "Não liberadas", "bad"),
+    c(rs.filter(r => r.lib.t === "LIBERADA").length, "Liberadas, aguardando", "ok"), c(rs.filter(r => r.lib.t === "MOBILIZADA").length, "Mobilizadas", "mob"),
+    c(rs.reduce((a, r) => a + r.atras, 0), "Itens atrasados", "warn"),
+    c(lista.filter(o => !o.dataRealMob && o.previsaoMob && dias(o.previsaoMob, hoje()) >= 0 && dias(o.previsaoMob, hoje()) <= 7 && resumo(o).pendMob > 0).length, "Mobilizam em 7 dias com pendência", "bad")); }
+
+function telaObras() {
+  const q = UI.busca.trim().toLowerCase();
+  const lista = obras().map(o => ({ o, r: resumo(o) })).filter(({ o, r }) => {
+      if (UI.filtro === "ativas") return !encerrada(o); if (UI.filtro === "naolib") return !encerrada(o) && r.lib.t === "NÃO LIBERADA";
+      if (UI.filtro === "lib") return !encerrada(o) && r.lib.t === "LIBERADA"; if (UI.filtro === "mob") return r.lib.t === "MOBILIZADA";
+      if (UI.filtro === "atras") return r.atras > 0; return true; })
+    .filter(({ o }) => !q || [o.id, o.nome, o.cliente, o.cidade, o.respEctas].join(" ").toLowerCase().includes(q));
+  const linhas = lista.map(({ o, r }) => { const falta = o.previsaoMob && !o.dataRealMob ? dias(o.previsaoMob, hoje()) : null;
+    return h("tr", { class: "click", tabindex: "0", onclick: () => { UI.obra = o.id; render(); scrollTo(0, 0); }, onkeydown: e => { if (e.key === "Enter") { UI.obra = o.id; render(); } } },
+      h("td", {}, h("span", { class: "code", text: o.id })), h("td", {}, h("b", { text: o.nome || "" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") })),
+      h("td", { text: o.respEctas || "" }), h("td", { class: "n", text: o.dataRealMob ? "✓ " + fmt(o.dataRealMob) : fmt(o.previsaoMob) }),
+      h("td", { class: "n", text: falta == null ? "" : (falta >= 0 ? falta + "d" : (-falta) + "d atrás"), style: falta != null && falta <= 7 && r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
+      h("td", { class: "n" }, pct(r.pct), h("span", { class: "mini" }, h("i", { style: "width:" + pct(r.pct) }))),
+      h("td", { class: "n", text: r.pendMob, style: r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
+      h("td", { class: "n", text: r.atras, style: r.atras ? "color:var(--warn);font-weight:700" : "" }),
+      h("td", {}, h("span", { class: "pill " + r.lib.c, text: r.lib.t }))); });
+  return h("div", { style: "display:flex;flex-direction:column;gap:10px" },
+    h("div", { class: "bar" }, h("input", { class: "busca grow", id: "busca", type: "search", placeholder: "Buscar obra, cliente, cidade ou responsável", value: UI.busca, style: "max-width:420px",
+        oninput: e => { UI.busca = e.target.value; const pos = e.target.selectionStart; render(); const b = $("#busca"); b.focus(); b.setSelectionRange(pos, pos); } }),
+      h("div", { class: "chips" }, [["ativas", "Ativas"], ["naolib", "Não liberadas"], ["lib", "Liberadas"], ["mob", "Mobilizadas"], ["atras", "Com atraso"], ["todas", "Todas"]].map(([k, t]) =>
+        h("button", { class: "chip", "aria-pressed": String(UI.filtro === k), onclick: () => { UI.filtro = k; render(); } }, t)))),
+    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Resp. ECTAS", "Mobilização", "Faltam", "Concluído", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: i >= 3 && i <= 7 ? "n" : "", text: t })))),
+      h("tbody", {}, linhas))) : h("p", { class: "vazio", text: "Nenhuma obra neste filtro." })); }
+
+function telaObra(o) {
+  const r = resumo(o); const cats = [...new Set(itensAtivos().map(i => i.categoria))];
+  const info = [["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
+    ["Data da verificação", fmt(o.dataVerificacao)], ["Previsão de mobilização", fmt(o.previsaoMob)], ["Mobilização real", fmt(o.dataRealMob)], ["Situação", o.situacao], ["Observações", o.obs]].filter(x => x[1]);
+  const corpo = [];
+  for (const c of cats) { corpo.push(h("tr", {}, h("td", { colspan: "7", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c })));
+    for (const it of itensAtivos().filter(i => i.categoria === c)) { const g = reg(o, it.codigo), s = g.status || "Pendente", sp = situacaoPrazo(g);
+      const cls = { "Concluído": "p-ok", "Em andamento": "p-warn", "Pendente": "p-bad", "Não aplicável": "p-na" }[s];
+      const fotos = (g.fotos || []).filter(f => String(f).startsWith("d:"));
+      const thumbs = fotos.length && D.fonte === "central" ? h("div", { class: "thumbs" }, fotos.map(f => { const ph = h("div", { class: "ph", text: "foto" }); carregarFoto(f.slice(2), ph); return ph; })) : null;
+      corpo.push(h("tr", {}, h("td", {}, h("span", { class: "code", text: it.codigo })), h("td", {}, it.item, h("div", { class: "meta", text: "Até " + it.etapa })),
+        h("td", {}, h("span", { class: "pill " + cls, text: s })), h("td", { text: [g.parte, g.resp].filter(Boolean).join(" · ") }),
+        h("td", { class: "n", text: g.prev ? fmt(g.prev) : "" }, h("div", { class: "meta", text: sp === "Atrasado" ? "Atrasado " + dias(hoje(), g.prev) + "d" : sp === "Concluído com atraso" ? "com atraso" : "" })),
+        h("td", { class: "n", text: fmt(g.concl) }),
+        h("td", {}, g.obs || "", g.link ? h("div", {}, h("a", { href: g.link, target: "_blank", rel: "noopener", text: "evidência" })) : null, thumbs,
+          g.por ? h("div", { class: "meta", text: "por " + g.por + (g.em ? " em " + new Date(g.em).toLocaleDateString("pt-BR") : "") }) : null))); } }
+  return h("div", { style: "display:flex;flex-direction:column;gap:14px" },
+    h("button", { class: "more", style: "align-self:flex-start", onclick: () => { UI.obra = null; render(); } }, "‹ Voltar para as obras"),
+    h("div", { class: "card", style: "display:flex;flex-direction:column;gap:12px" },
+      h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "pill " + r.lib.c, text: r.lib.t })),
+      h("h2", { style: "margin:0;font-size:20px", text: o.nome || "" }),
+      h("div", { class: "prog" }, h("i", { style: "width:" + pct(r.pct) })),
+      h("div", { class: "stats" }, [[pct(r.pct), "Concluído"], [r.conc + "/" + r.apl, "Itens"], [r.pendMob, "P/ mobilizar"], [r.atras, "Atrasados"]].map(([v, t]) => h("div", { class: "stat" }, h("b", { text: v }), h("span", { text: t })))),
+      h("dl", { class: "det" }, info.map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v }))))),
+    h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Cód.", "Item", "Status", "Responsável", "Prazo", "Conclusão", "Observações / evidências"].map((t, i) => h("th", { class: i === 4 || i === 5 ? "n" : "", text: t })))), h("tbody", {}, corpo)))); }
+
+const cacheFoto = {};
+async function carregarFoto(id, ph) {
+  try { if (!cacheFoto[id]) cacheFoto[id] = api({ acao: "supFoto", id }).then(r => "data:image/jpeg;base64," + r.b64);
+    const src = await cacheFoto[id]; const img = h("img", { src, alt: "Foto" }); ph.replaceChildren(img);
+    ph.onclick = () => { const lb = h("div", { class: "lightbox", onclick: () => lb.remove() }, h("img", { src, alt: "Foto" })); document.body.append(lb); };
+  } catch (e) { ph.textContent = "indisponível"; } }
+
+/* ---------- mês a mês ---------- */
+function calcMes(ano) {
+  const linhas = MESES.map(() => ({ prev: 0, mob: 0, mobPrazo: 0, prazoMes: 0, conc: 0, noPrazo: 0, atraso: 0, atrasados: 0 }));
+  const noAno = d => d && +d.slice(0, 4) === ano, mes = d => +d.slice(5, 7) - 1;
+  for (const o of obras()) {
+    if (noAno(o.previsaoMob)) linhas[mes(o.previsaoMob)].prev++;
+    if (noAno(o.dataRealMob)) { const L = linhas[mes(o.dataRealMob)]; L.mob++; if (o.previsaoMob && o.dataRealMob <= o.previsaoMob) L.mobPrazo++; }
+    for (const it of itensAtivos()) { const g = reg(o, it.codigo), s = g.status || "Pendente", sp = situacaoPrazo(g);
+      if (noAno(g.prev) && s !== "Não aplicável") { linhas[mes(g.prev)].prazoMes++; if (sp === "Atrasado") linhas[mes(g.prev)].atrasados++; }
+      if (s === "Concluído" && noAno(g.concl)) { const L = linhas[mes(g.concl)]; L.conc++; if (sp === "Concluído no prazo") L.noPrazo++; if (sp === "Concluído com atraso") L.atraso++; } } }
+  const tot = linhas.reduce((a, l) => { for (const k in l) a[k] = (a[k] || 0) + l[k]; return a; }, {});
+  return { linhas, tot }; }
+function telaMes() {
+  const anos = new Set([new Date().getFullYear()]);
+  for (const o of obras()) { for (const d of [o.previsaoMob, o.dataRealMob]) if (d) anos.add(+d.slice(0, 4)); for (const g of Object.values(o.checklist || {})) for (const d of [g.prev, g.concl]) if (d) anos.add(+d.slice(0, 4)); }
+  const { linhas, tot } = calcMes(UI.ano);
+  const p = (a, b) => b ? pct(a / b) : "-";
+  const row = (nome, l, cls) => h("tr", { class: cls || "" }, h("td", { text: nome }), ...[l.prev, l.mob, l.mobPrazo].map(v => h("td", { class: "n", text: v })),
+    h("td", { class: "n", text: p(l.mobPrazo, l.mob) }), ...[l.prazoMes, l.conc, l.noPrazo, l.atraso].map(v => h("td", { class: "n", text: v })),
+    h("td", { class: "n", text: p(l.noPrazo, l.noPrazo + l.atraso), style: l.noPrazo + l.atraso && l.noPrazo / (l.noPrazo + l.atraso) < .8 ? "color:var(--bad);font-weight:700" : "" }),
+    h("td", { class: "n", text: l.atrasados, style: l.atrasados ? "color:var(--bad);font-weight:700" : "" }));
+  const mesAtual = UI.ano === new Date().getFullYear() ? new Date().getMonth() : -1;
+  const tabela = h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Mês", "Obras c/ mobilização prevista", "Obras mobilizadas", "Mobilizadas no prazo", "% mobil. no prazo", "Itens c/ prazo no mês", "Itens concluídos", "No prazo", "Com atraso", "% no prazo", "Atrasados em aberto"].map((t, i) => h("th", { class: i ? "n" : "", text: t, style: "white-space:normal;min-width:" + (i ? 78 : 90) + "px" })))),
+    h("tbody", {}, linhas.map((l, i) => { const tr = row(MESES[i], l); if (i === mesAtual) tr.style.boxShadow = "inset 4px 0 0 var(--azul)"; return tr; }), row("TOTAL " + UI.ano, tot, "tot"))));
+  return h("div", { style: "display:flex;flex-direction:column;gap:12px" },
+    h("div", { class: "bar" }, h("b", { text: "Ano" }), h("select", { class: "ano", id: "ano", onchange: e => { UI.ano = +e.target.value; render(); } }, [...anos].sort().map(a => h("option", { value: a, selected: a === UI.ano || null }, a))),
+      h("span", { class: "grow" }), h("span", { class: "meta", text: "Concluídos contam pela data de conclusão; prazos pela data prevista; obras pela previsão e pela data real de mobilização." })),
+    grafico(linhas), tabela); }
+function grafico(linhas) {
+  const W = 720, H = 220, L = 34, B = 26, T = 12, max = Math.max(4, ...linhas.map(l => l.noPrazo + l.atraso + (l.conc - l.noPrazo - l.atraso)));
+  const passo = Math.ceil(max / 4), topo = passo * 4, bw = (W - L - 10) / 12;
+  const y = v => T + (H - T - B) * (1 - v / topo);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Itens concluídos por mês"); svg.style.width = "100%"; svg.style.height = "auto";
+  const el = (n, a, t) => { const e = document.createElementNS("http://www.w3.org/2000/svg", n); for (const k in a) e.setAttribute(k, a[k]); if (t != null) e.textContent = t; svg.append(e); return e; };
+  for (let i = 0; i <= 4; i++) { const v = passo * i; el("line", { x1: L, x2: W - 6, y1: y(v), y2: y(v), stroke: "currentColor", "stroke-opacity": .12 }); el("text", { x: L - 6, y: y(v) + 4, "text-anchor": "end" }, v); }
+  linhas.forEach((l, i) => { const x = L + i * bw + bw * .18, w = bw * .64, sem = l.conc - l.noPrazo - l.atraso; let base = 0;
+    for (const [v, cor] of [[l.noPrazo, "#0073A8"], [l.atraso, "#E07B39"], [sem, "#66D3CD"]]) { if (!v) continue; el("rect", { x, y: y(base + v), width: w, height: y(base) - y(base + v), fill: cor, rx: 2 }); base += v; }
+    if (l.conc) el("text", { x: x + w / 2, y: y(l.conc) - 4, "text-anchor": "middle", style: "font-weight:700" }, l.conc);
+    el("text", { x: x + w / 2, y: H - 8, "text-anchor": "middle" }, MESES[i].slice(0, 3)); });
+  return h("div", { class: "card" }, h("b", { text: "Itens concluídos por mês" }),
+    h("div", { class: "legenda" }, h("span", {}, h("i", { style: "background:#0073A8" }), "No prazo"), h("span", {}, h("i", { style: "background:#E07B39" }), "Com atraso"), h("span", {}, h("i", { style: "background:#66D3CD" }), "Sem data prevista")), svg); }
+
+/* ---------- exportar consolidado ---------- */
+function exportar() {
+  const d = s => s ? new Date(s + "T12:00:00") : "";
+  const O = [["ID Obra", "Obra / Empreendimento", "Cliente", "Cidade/UF", "Modelo / Tipo de ETE", "Responsável ECTAS", "Contato do cliente", "Telefone / E-mail", "Data da verificação", "Previsão de mobilização", "Data real de mobilização", "Situação da obra", "Observações gerais", "% concluído", "Pendências p/ mobilização", "Itens atrasados", "Liberação p/ mobilização"]];
+  const R = [["ID Obra", "Código item", "Categoria", "Item de verificação", "Etapa limite", "Status", "Parte responsável", "Responsável (nome)", "Data prevista", "Data conclusão", "Situação do prazo", "Evidência (link foto/doc)", "Observações / Pendências", "Última atualização", "Atualizado por"]];
+  for (const o of obras()) { const r = resumo(o);
+    O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs, r.pct, r.pendMob, r.atras, r.lib.t].map(x => x == null ? "" : x));
+    for (const it of itensAtivos()) { const g = reg(o, it.codigo);
+      R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, g.status || "Pendente", g.parte || "", g.resp || "", d(g.prev), d(g.concl), situacaoPrazo(g), g.link || "", g.obs || "", g.em ? new Date(g.em) : "", g.por || ""]); } }
+  const { linhas, tot } = calcMes(UI.ano);
+  const M = [["Mês", "Obras c/ mobilização prevista", "Obras mobilizadas", "Mobilizadas no prazo", "Itens c/ prazo no mês", "Itens concluídos", "Concluídos no prazo", "Concluídos com atraso", "Atrasados em aberto"]];
+  linhas.forEach((l, i) => M.push([MESES[i], l.prev, l.mob, l.mobPrazo, l.prazoMes, l.conc, l.noPrazo, l.atraso, l.atrasados]));
+  M.push(["TOTAL " + UI.ano, tot.prev, tot.mob, tot.mobPrazo, tot.prazoMes, tot.conc, tot.noPrazo, tot.atraso, tot.atrasados]);
+  const wb = XLSX.utils.book_new(), opt = { cellDates: true, dateNF: "dd/mm/yyyy" };
+  const w1 = XLSX.utils.aoa_to_sheet(O, opt), w2 = XLSX.utils.aoa_to_sheet(R, opt), w3 = XLSX.utils.aoa_to_sheet(M);
+  w1["!cols"] = [12, 32, 24, 16, 22, 20, 20, 22, 13, 13, 13, 18, 40, 11, 12, 11, 16].map(w => ({ wch: w })); w2["!cols"] = [12, 10, 13, 52, 13, 14, 13, 20, 12, 12, 20, 26, 42, 16, 18].map(w => ({ wch: w })); w3["!cols"] = [14, 14, 12, 12, 12, 12, 12, 12, 12].map(w => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, w1, "OBRAS"); XLSX.utils.book_append_sheet(wb, w2, "REGISTRO"); XLSX.utils.book_append_sheet(wb, w3, "MES A MES " + UI.ano);
+  XLSX.writeFile(wb, `Checklist_ECTAS_consolidado_${hoje()}.xlsx`, { cellDates: true }); }
+
+/* ---------- início ---------- */
+render();
+if (CENTRAL.url && SENHA) carregarCentral();

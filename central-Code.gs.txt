@@ -5,7 +5,7 @@
  *  - as fotos numa pasta do Google Drive, uma subpasta por obra.
  *
  * COMO INSTALAR (uma vez):
- *  1. Troque o CODIGO_EQUIPE abaixo pelo código que a equipe vai digitar no app.
+ *  1. Troque o CODIGO_EQUIPE (equipe de campo) e a SENHA_SUPERVISOR (painel do supervisor) abaixo.
  *  2. Rode a função configurar() pelo editor e autorize o acesso.
  *  3. Implantar > Nova implantação > Tipo: App da Web
  *     Executar como: Eu  |  Quem pode acessar: Qualquer pessoa
@@ -14,7 +14,8 @@
  * Para mudar a lista padrão de itens, edite a aba ITENS da planilha
  * (coluna Ativo = Não tira o item do app sem apagar o que já foi preenchido).
  */
-const CODIGO_EQUIPE = "ectas-checklist";   // TROQUE antes de implantar
+const CODIGO_EQUIPE = "ectas-checklist";          // TROQUE: código da equipe de campo
+const SENHA_SUPERVISOR = "supervisor-ectas";      // TROQUE: senha do painel do supervisor
 const NOME_PLANILHA = "Checklist de Pré-Instalação ECTAS - Base";
 const PASTA_FOTOS = "Checklist de Pré-Instalação ECTAS - Fotos";
 const TZ = "America/Sao_Paulo";
@@ -82,6 +83,7 @@ const ITENS_PADRAO = [
 
 /* ---------------- utilidades ---------------- */
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+function senha_() { return PropertiesService.getScriptProperties().getProperty("SENHA_SUPERVISOR") || SENHA_SUPERVISOR; }
 function codigo_() { return PropertiesService.getScriptProperties().getProperty("CODIGO_EQUIPE") || CODIGO_EQUIPE; }
 function limpa_(s, max) { return String(s == null ? "" : s).slice(0, max || 3000); }
 function idObra_(s) { return String(s || "").trim().toUpperCase().replace(/\s+/g, "-").replace(/[^A-Z0-9\-]/g, ""); }
@@ -157,6 +159,14 @@ function doPost(e) {
   let b;
   try { b = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, erro: "formato inválido" }); }
   if (b.acao === "ping") return json_({ ok: true, codigoOk: String(b.codigo || "") === codigo_() });
+  // Painel do supervisor: só leitura, protegido pela senha do supervisor
+  if (String(b.acao || "").indexOf("sup") === 0) {
+    if (String(b.senha || "") !== senha_()) return json_({ ok: false, erro: "senha" });
+    if (b.acao === "supPing") return json_({ ok: true });
+    if (b.acao === "supFoto") return json_(verFoto_(b.id));
+    if (b.acao === "supCarregar") return json_(carregar_());
+    return json_({ ok: false, erro: "ação desconhecida" });
+  }
   if (String(b.codigo || "") !== codigo_()) return json_({ ok: false, erro: "codigo" });
   if (b.acao === "verFoto") return json_(verFoto_(b.id));
   const lk = LockService.getScriptLock();
@@ -270,4 +280,5 @@ function configurar() {
   abaObras_(); abaReg_(); abaItens_(); pasta_(PASTA_FOTOS);
   Logger.log("Planilha: " + planilha_().getUrl());
   Logger.log("Código da equipe em uso: " + codigo_());
+  Logger.log("Senha do supervisor em uso: " + senha_());
 }
