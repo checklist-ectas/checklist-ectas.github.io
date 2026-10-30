@@ -1,11 +1,17 @@
 /**
  * Checklist de Pré-Instalação ECTAS - Central
- * Recebe o checklist preenchido no app de campo (GitHub Pages) e guarda:
- *  - na planilha "Checklist de Pré-Instalação ECTAS - Base" (abas OBRAS, REGISTRO e ITENS)
+ * Recebe o checklist conferido no app de campo (GitHub Pages) e guarda:
+ *  - na planilha "Checklist de Pré-Instalação ECTAS - Base" (abas OBRAS, REGISTRO, ITENS e TECNICOS)
  *  - as fotos numa pasta do Google Drive, uma subpasta por obra.
  *
+ * Quem faz o quê:
+ *  - O supervisor (painel /supervisor, com a SENHA_SUPERVISOR) cadastra os técnicos e as obras
+ *    e escolhe o técnico responsável de cada obra.
+ *  - Cada técnico entra no app de campo com o seu código pessoal e só recebe, vê e altera
+ *    as obras em que ele é o responsável.
+ *
  * COMO INSTALAR (uma vez):
- *  1. Troque o CODIGO_EQUIPE (equipe de campo) e a SENHA_SUPERVISOR (painel do supervisor) abaixo.
+ *  1. Troque a SENHA_SUPERVISOR abaixo.
  *  2. Rode a função configurar() pelo editor e autorize o acesso.
  *  3. Implantar > Nova implantação > Tipo: App da Web
  *     Executar como: Eu  |  Quem pode acessar: Qualquer pessoa
@@ -14,7 +20,6 @@
  * Para mudar a lista padrão de itens, edite a aba ITENS da planilha
  * (coluna Ativo = Não tira o item do app sem apagar o que já foi preenchido).
  */
-const CODIGO_EQUIPE = "ectas-checklist";          // TROQUE: código da equipe de campo
 const SENHA_SUPERVISOR = "supervisor-ectas";      // TROQUE: senha do painel do supervisor
 const NOME_PLANILHA = "Checklist de Pré-Instalação ECTAS - Base";
 const PASTA_FOTOS = "Checklist de Pré-Instalação ECTAS - Fotos";
@@ -22,10 +27,10 @@ const TZ = "America/Sao_Paulo";
 
 const COL_OBRAS = [
   ["id", "ID Obra"], ["nome", "Obra / Empreendimento"], ["cliente", "Cliente"], ["cidade", "Cidade/UF"],
-  ["modelo", "Modelo / Tipo de ETE"], ["respEctas", "Responsável ECTAS"], ["contato", "Contato do cliente"],
-  ["telefone", "Telefone / E-mail"], ["dataVerificacao", "Data da verificação"], ["previsaoMob", "Previsão de mobilização"],
-  ["dataRealMob", "Data real de mobilização"], ["situacao", "Situação da obra"], ["obs", "Observações gerais"],
-  ["em", "Atualizado em"], ["por", "Atualizado por"]
+  ["modelo", "Modelo / Tipo de ETE"], ["respEctas", "Responsável ECTAS"], ["tecnico", "Técnico responsável (campo)"],
+  ["contato", "Contato do cliente"], ["telefone", "Telefone / E-mail"], ["dataVerificacao", "Data da verificação"],
+  ["previsaoMob", "Previsão de mobilização"], ["dataRealMob", "Data real de mobilização"], ["situacao", "Situação da obra"],
+  ["obs", "Observações gerais"], ["em", "Atualizado em"], ["por", "Atualizado por"]
 ];
 const COL_REG = [
   ["obra", "ID Obra"], ["cod", "Código item"], ["categoria", "Categoria"], ["item", "Item de verificação"],
@@ -36,6 +41,7 @@ const COL_REG = [
 ];
 const COL_ITENS = [["codigo", "Código"], ["categoria", "Categoria"], ["item", "Item de verificação"],
   ["etapa", "Etapa limite"], ["referencia", "Referência"], ["ativo", "Ativo (Sim/Não)"]];
+const COL_TEC = [["nome", "Nome do técnico"], ["codigo", "Código pessoal"], ["telefone", "Telefone (WhatsApp)"], ["ativo", "Ativo (Sim/Não)"]];
 const DATAS = ["dataVerificacao", "previsaoMob", "dataRealMob", "prev", "concl"];
 const CARIMBO = ["em"];
 
@@ -84,9 +90,10 @@ const ITENS_PADRAO = [
 /* ---------------- utilidades ---------------- */
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 function senha_() { return PropertiesService.getScriptProperties().getProperty("SENHA_SUPERVISOR") || SENHA_SUPERVISOR; }
-function codigo_() { return PropertiesService.getScriptProperties().getProperty("CODIGO_EQUIPE") || CODIGO_EQUIPE; }
 function limpa_(s, max) { return String(s == null ? "" : s).slice(0, max || 3000); }
 function idObra_(s) { return String(s || "").trim().toUpperCase().replace(/\s+/g, "-").replace(/[^A-Z0-9\-]/g, ""); }
+function norm_(s) { return String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").trim().replace(/\s+/g, " ").toUpperCase(); }
+const ativo_ = v => !/^n(ã|a)o$/i.test(String(v).trim());
 
 function planilha_() {
   const pr = PropertiesService.getScriptProperties();
@@ -112,13 +119,14 @@ function aba_(nome, cols) {
     cols.forEach((c, i) => {
       if (DATAS.indexOf(c[0]) >= 0) sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1).setNumberFormat("dd/MM/yyyy");
       if (CARIMBO.indexOf(c[0]) >= 0) sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1).setNumberFormat("dd/MM/yyyy HH:mm");
-      if (c[0] === "id" || c[0] === "obra" || c[0] === "cod" || c[0] === "codigo") sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1).setNumberFormat("@");
+      if (["id", "obra", "cod", "codigo"].indexOf(c[0]) >= 0) sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1).setNumberFormat("@");
     });
   }
   return sh;
 }
 const abaObras_ = () => aba_("OBRAS", COL_OBRAS);
 const abaReg_ = () => aba_("REGISTRO", COL_REG);
+const abaTec_ = () => aba_("TECNICOS", COL_TEC);
 function abaItens_() {
   const sh = aba_("ITENS", COL_ITENS);
   if (sh.getLastRow() < 2) {
@@ -150,7 +158,22 @@ function valor_(k, x) {
 }
 function linha_(cols, o) { return cols.map(c => valor_(c[0], o[c[0]])); }
 
-/* ---------------- app de campo ---------------- */
+/* ---------------- técnicos ---------------- */
+function tecnicos_() {
+  return ler_(abaTec_(), COL_TEC).filter(t => t.nome).map(t => ({ nome: String(t.nome).trim(), codigo: String(t.codigo).trim(), telefone: t.telefone, ativo: ativo_(t.ativo) }));
+}
+function tecnicoPorCodigo_(cod) {
+  cod = String(cod || "").trim(); if (!cod) return null;
+  const t = tecnicos_().filter(x => x.ativo && x.codigo === cod)[0];
+  return t || null;
+}
+function obrasDoTecnico_(nome) {
+  const n = norm_(nome), ids = {};
+  ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id && norm_(o.tecnico) === n) ids[o.id] = true; });
+  return ids;
+}
+
+/* ---------------- app de campo e painel ---------------- */
 function doGet(e) {
   return json_({ ok: true, app: "Checklist de Pré-Instalação ECTAS" });
 }
@@ -158,28 +181,35 @@ function doGet(e) {
 function doPost(e) {
   let b;
   try { b = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, erro: "formato inválido" }); }
-  if (b.acao === "ping") return json_({ ok: true, codigoOk: String(b.codigo || "") === codigo_() });
-  // Painel do supervisor: só leitura, protegido pela senha do supervisor
+
+  // Painel do supervisor: protegido pela senha do supervisor
   if (String(b.acao || "").indexOf("sup") === 0) {
     if (String(b.senha || "") !== senha_()) return json_({ ok: false, erro: "senha" });
     if (b.acao === "supPing") return json_({ ok: true });
-    if (b.acao === "supFoto") return json_(verFoto_(b.id));
-    if (b.acao === "supCarregar") return json_(carregar_());
-    if (b.acao === "supSalvarObra") {
-      const lk = LockService.getScriptLock(); lk.waitLock(25000);
-      try { return json_(salvarObras_([b.obra || {}], "Supervisor")); } finally { lk.releaseLock(); }
-    }
+    if (b.acao === "supFoto") return json_(verFoto_(b.id, null));
+    if (b.acao === "supCarregar") return json_(carregar_(null));
+    const lk = LockService.getScriptLock(); lk.waitLock(25000);
+    try {
+      if (b.acao === "supSalvarObra") return json_(salvarObra_(b.obra || {}));
+      if (b.acao === "supSalvarTecnico") return json_(salvarTecnico_(b.tecnico || {}));
+    } finally { lk.releaseLock(); }
     return json_({ ok: false, erro: "ação desconhecida" });
   }
-  if (String(b.codigo || "") !== codigo_()) return json_({ ok: false, erro: "codigo" });
-  if (b.acao === "verFoto") return json_(verFoto_(b.id));
-  const lk = LockService.getScriptLock();
-  lk.waitLock(25000);
+
+  // App de campo: cada técnico entra com o próprio código e só mexe nas obras dele
+  const tec = tecnicoPorCodigo_(b.codigo);
+  if (b.acao === "ping") return json_({ ok: true, codigoOk: !!tec, tecnico: tec ? tec.nome : "" });
+  if (!tec) return json_({ ok: false, erro: "codigo" });
+  const minhas = obrasDoTecnico_(tec.nome);
+  if (b.acao === "verFoto") return json_(verFoto_(b.id, minhas));
+  const lk = LockService.getScriptLock(); lk.waitLock(25000);
   try {
-    if (b.acao === "carregar") return json_(carregar_());
-    if (b.acao === "salvarObras") return json_(salvarObras_(b.obras || [], limpa_(b.autor, 80)));
-    if (b.acao === "salvarItens") return json_(salvarItens_(b.mudancas || [], limpa_(b.autor, 80)));
-    if (b.acao === "foto") return json_(salvarFoto_(b));
+    if (b.acao === "carregar") return json_(carregar_(tec.nome));
+    if (b.acao === "salvarItens") return json_(salvarItens_(b.mudancas || [], tec.nome, minhas));
+    if (b.acao === "foto") {
+      if (!minhas[idObra_(b.obra)]) return json_({ ok: false, erro: "Obra de outro técnico." });
+      return json_(salvarFoto_(b));
+    }
     return json_({ ok: false, erro: "ação desconhecida" });
   } finally { lk.releaseLock(); }
 }
@@ -187,48 +217,63 @@ function doPost(e) {
 function itens_() {
   return ler_(abaItens_(), COL_ITENS).filter(i => i.codigo).map(i => ({
     codigo: String(i.codigo).trim(), categoria: i.categoria, item: i.item, etapa: i.etapa || "Mobilização",
-    referencia: i.referencia, ativo: !/^n(ã|a)o$/i.test(String(i.ativo).trim())
+    referencia: i.referencia, ativo: ativo_(i.ativo)
   }));
 }
 
-function carregar_() {
+// tecnico = null: tudo (supervisor). tecnico = nome: só as obras desse técnico.
+function carregar_(tecnico) {
   const obras = {};
-  ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id) { delete o._linha; o.checklist = {}; obras[o.id] = o; } });
+  ler_(abaObras_(), COL_OBRAS).forEach(o => {
+    if (!o.id) return;
+    if (tecnico !== null && norm_(o.tecnico) !== norm_(tecnico)) return;
+    delete o._linha; o.checklist = {}; obras[o.id] = o;
+  });
   ler_(abaReg_(), COL_REG).forEach(r => {
     const o = obras[r.obra]; if (!o || !r.cod) return;
     let fotos = []; try { fotos = JSON.parse(r.fotos || "[]"); } catch (e) { }
     o.checklist[r.cod] = { status: r.status || "Pendente", parte: r.parte, resp: r.resp, prev: r.prev, concl: r.concl,
       link: r.link, obs: r.obs, em: r.em, por: r.por, fotos: fotos.map(id => "d:" + id) };
   });
-  return { ok: true, itens: itens_(), obras: Object.keys(obras).map(k => obras[k]), planilha: planilha_().getUrl(), agora: new Date().toISOString() };
+  const out = { ok: true, itens: itens_(), obras: Object.keys(obras).map(k => obras[k]), agora: new Date().toISOString() };
+  if (tecnico === null) { out.tecnicos = tecnicos_(); out.planilha = planilha_().getUrl(); }
+  return out;
 }
 
-function salvarObras_(lista, autor) {
+function salvarObra_(n) {
   const sh = abaObras_();
-  const atuais = ler_(sh, COL_OBRAS), porId = {};
-  atuais.forEach(o => porId[o.id] = o);
-  const salvas = [];
-  lista.forEach(n => {
-    const id = idObra_(n.id); if (!id) return;
-    const velho = porId[id];
-    const o = Object.assign({}, velho || {}, n, { id: id, por: n.por || autor });
-    if (!o.em) o.em = new Date().toISOString();
-    if (velho) sh.getRange(velho._linha, 1, 1, COL_OBRAS.length).setValues([linha_(COL_OBRAS, o)]);
-    else { sh.appendRow(linha_(COL_OBRAS, o)); porId[id] = Object.assign(o, { _linha: sh.getLastRow() }); }
-    salvas.push(id);
-  });
-  return { ok: true, salvas: salvas };
+  const id = idObra_(n.id); if (!id) return { ok: false, erro: "Obra sem ID." };
+  const velho = ler_(sh, COL_OBRAS).filter(o => o.id === id)[0];
+  const o = Object.assign({}, velho || {}, n, { id: id, por: "Supervisor", em: new Date().toISOString() });
+  if (velho) sh.getRange(velho._linha, 1, 1, COL_OBRAS.length).setValues([linha_(COL_OBRAS, o)]);
+  else sh.appendRow(linha_(COL_OBRAS, o));
+  return { ok: true, id: id };
 }
 
-function salvarItens_(mudancas, autor) {
+function salvarTecnico_(t) {
+  const nome = String(t.nome || "").trim(), codigo = String(t.codigo || "").trim();
+  if (!nome || !/^\d{4,8}$/.test(codigo)) return { ok: false, erro: "Informe o nome e um código de 4 a 8 números." };
+  const sh = abaTec_(), lista = ler_(sh, COL_TEC);
+  if (lista.some(x => x.codigo === codigo && norm_(x.nome) !== norm_(nome))) return { ok: false, erro: "Este código já é de outro técnico." };
+  const velho = lista.filter(x => norm_(x.nome) === norm_(t.nomeAntigo || nome))[0];
+  const linha = [nome, codigo, limpa_(t.telefone, 40), t.ativo === false ? "Não" : "Sim"];
+  if (velho) sh.getRange(velho._linha, 1, 1, COL_TEC.length).setValues([linha]);
+  else sh.appendRow(linha);
+  sh.getRange("B:B").setNumberFormat("@");
+  return { ok: true };
+}
+
+function salvarItens_(mudancas, autor, minhas) {
   const sh = abaReg_();
   const atuais = ler_(sh, COL_REG), porChave = {};
   atuais.forEach(r => porChave[r.obra + "|" + r.cod] = r);
   const cat = {}; itens_().forEach(i => cat[i.codigo] = i);
-  const aceitas = [], ignoradas = [];
+  const aceitas = [], ignoradas = [], recusadas = [];
   mudancas.forEach(m => {
     const obra = idObra_(m.obra), cod = String(m.cod || "").trim(); if (!obra || !cod) return;
-    const d = m.dados || {}, k = obra + "|" + cod, velho = porChave[k];
+    const k = obra + "|" + cod;
+    if (!minhas[obra]) { recusadas.push(k); return; }           // obra de outro técnico
+    const d = m.dados || {}, velho = porChave[k];
     // vale a alteração mais recente: se o servidor já tem uma mais nova, mantém a dele
     if (velho && velho.em && d.em && new Date(d.em).getTime() < new Date(velho.em).getTime() - 500) { ignoradas.push(k); return; }
     const fotos = (d.fotos || []).filter(f => String(f).indexOf("d:") === 0).map(f => String(f).slice(2));
@@ -236,14 +281,14 @@ function salvarItens_(mudancas, autor) {
     const r = {
       obra: obra, cod: cod, categoria: it.categoria || "", item: it.item || "", etapa: it.etapa || "",
       status: d.status || "Pendente", parte: d.parte, resp: d.resp, prev: d.prev, concl: d.concl, link: d.link, obs: d.obs,
-      em: d.em || new Date().toISOString(), por: d.por || autor,
+      em: d.em || new Date().toISOString(), por: autor,
       pasta: fotos.length ? pastaObra_(obra).getUrl() : "", fotos: fotos.length ? JSON.stringify(fotos) : ""
     };
     if (velho) sh.getRange(velho._linha, 1, 1, COL_REG.length).setValues([linha_(COL_REG, r)]);
     else { sh.appendRow(linha_(COL_REG, r)); porChave[k] = { _linha: sh.getLastRow(), em: r.em }; }
     aceitas.push(k);
   });
-  return { ok: true, aceitas: aceitas, ignoradas: ignoradas };
+  return { ok: true, aceitas: aceitas, ignoradas: ignoradas, recusadas: recusadas };
 }
 
 function pastaObra_(obra) {
@@ -267,13 +312,17 @@ function salvarFoto_(b) {
   return { ok: true, id: arq.getId() };
 }
 
-function verFoto_(id) {
+// minhas = null (supervisor): qualquer foto do checklist. Senão, só fotos das obras do técnico.
+function verFoto_(id, minhas) {
   try {
     const f = DriveApp.getFileById(String(id));
-    // só entrega fotos que estão na pasta do checklist
     const raiz = pasta_(PASTA_FOTOS).getId();
     const pais = f.getParents(); let ok = false;
-    while (pais.hasNext() && !ok) { const p = pais.next(); const avos = p.getParents(); while (avos.hasNext()) if (avos.next().getId() === raiz) ok = true; }
+    while (pais.hasNext() && !ok) {
+      const p = pais.next(); const avos = p.getParents(); let naRaiz = false;
+      while (avos.hasNext()) if (avos.next().getId() === raiz) naRaiz = true;
+      if (naRaiz && (minhas === null || minhas[p.getName()])) ok = true;
+    }
     if (!ok) return { ok: false, erro: "foto não encontrada" };
     return { ok: true, b64: Utilities.base64Encode(f.getBlob().getBytes()) };
   } catch (e) { return { ok: false, erro: "foto não encontrada" }; }
@@ -281,8 +330,7 @@ function verFoto_(id) {
 
 /* Rode uma vez pelo editor: cria a planilha, as abas e a pasta de fotos. */
 function configurar() {
-  abaObras_(); abaReg_(); abaItens_(); pasta_(PASTA_FOTOS);
+  abaObras_(); abaReg_(); abaItens_(); abaTec_(); pasta_(PASTA_FOTOS);
   Logger.log("Planilha: " + planilha_().getUrl());
-  Logger.log("Código da equipe em uso: " + codigo_());
   Logger.log("Senha do supervisor em uso: " + senha_());
 }

@@ -48,7 +48,7 @@ async function api(corpo) {
 async function carregarCentral() {
   UI.carregando = true; UI.erro = ""; render();
   try { const r = await api({ acao: "supCarregar" }); const ob = {}; for (const o of r.obras || []) ob[o.id] = o;
-    D = { obras: ob, itens: r.itens || [], fonte: "central", em: new Date().toISOString(), planilha: r.planilha || "" }; gravar("sup-dados", D);
+    D = { obras: ob, itens: r.itens || [], tecnicos: r.tecnicos || [], fonte: "central", em: new Date().toISOString(), planilha: r.planilha || "" }; gravar("sup-dados", D);
   } catch (e) { if (e.senha) { SENHA = ""; gravar("sup-senha", ""); UI.erro = "Senha incorreta."; } else UI.erro = "Não foi possível falar com a central. Mostrando os últimos dados carregados."; }
   UI.carregando = false; render(); }
 
@@ -56,7 +56,7 @@ const dIso = v => { if (v instanceof Date && !isNaN(v)) return v.getFullYear() +
   const s = String(v || "").trim(); let m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/); if (m) return `${m[3]}-${m[2]}-${m[1]}`; m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : ""; };
 const tIso = v => v instanceof Date && !isNaN(v) ? v.toISOString() : (String(v || "") ? new Date(v).toISOString() : "");
 async function importar(arquivos) {
-  let nObras = 0, nItens = 0; const base = D.fonte === "arquivos" ? D : { obras: {}, itens: [], fonte: "arquivos" };
+  let nObras = 0, nItens = 0; const base = D.fonte === "arquivos" ? D : { obras: {}, itens: [], tecnicos: D.tecnicos || [], fonte: "arquivos" };
   const cat = new Map((base.itens || []).map(i => [i.codigo, i]));
   for (const f of arquivos) {
     try {
@@ -65,7 +65,7 @@ async function importar(arquivos) {
       if (!so || !sr) { UI.erro = `O arquivo ${f.name} não é uma exportação do app (faltam as abas OBRAS e REGISTRO).`; continue; }
       for (const r of XLSX.utils.sheet_to_json(so, { defval: "" })) { const id = String(r["ID Obra"] || "").trim().toUpperCase(); if (!id) continue;
         const o = base.obras[id] || (base.obras[id] = { id, checklist: {} }); nObras++;
-        const map = { nome: "Obra / Empreendimento", cliente: "Cliente", cidade: "Cidade/UF", modelo: "Modelo / Tipo de ETE", respEctas: "Responsável ECTAS", contato: "Contato do cliente", telefone: "Telefone / E-mail", situacao: "Situação da obra", obs: "Observações gerais" };
+        const map = { nome: "Obra / Empreendimento", cliente: "Cliente", cidade: "Cidade/UF", modelo: "Modelo / Tipo de ETE", respEctas: "Responsável ECTAS", tecnico: "Técnico responsável", contato: "Contato do cliente", telefone: "Telefone / E-mail", situacao: "Situação da obra", obs: "Observações gerais" };
         for (const [k, c] of Object.entries(map)) if (String(r[c] || "").trim()) o[k] = String(r[c]).trim();
         for (const [k, c] of [["dataVerificacao", "Data da verificação"], ["previsaoMob", "Previsão de mobilização"], ["dataRealMob", "Data real de mobilização"]]) if (dIso(r[c])) o[k] = dIso(r[c]); }
       for (const r of XLSX.utils.sheet_to_json(sr, { defval: "" })) { const id = String(r["ID Obra"] || "").trim().toUpperCase(), cod = String(r["Código item"] || "").trim(); if (!id || !cod) continue;
@@ -85,7 +85,7 @@ function toast(m) { const t = h("div", { class: "toast", role: "status", text: m
 /* ---------- telas ---------- */
 function topo() {
   $("#fonte").textContent = D.fonte === "central" ? "Dados da central · " + (D.em ? new Date(D.em).toLocaleString("pt-BR") : "")
-    : D.fonte === "arquivos" ? "Dados dos arquivos importados" : "Checklist de Pré-Instalação";
+    : D.fonte === "arquivos" ? "Dados salvos neste navegador" : "Checklist de Pré-Instalação";
   const ac = [];
   if (!CENTRAL.url || SENHA) ac.push(h("button", { class: "acao", onclick: () => { UI.form = "nova"; UI.obra = null; render(); scrollTo(0, 0); } }, "+ Nova obra"));
   if (CENTRAL.url && SENHA) ac.push(h("button", { class: "acao", onclick: carregarCentral }, UI.carregando ? "Atualizando…" : "Atualizar"));
@@ -100,16 +100,11 @@ function render() {
   if (UI.erro) kids.push(h("div", { class: "notice warn", text: UI.erro }));
   if (!CENTRAL.url) kids.push(blocoImportar());
   if (UI.form) { m.replaceChildren(...kids, telaForm(UI.form === "nova" ? null : D.obras[UI.form])); return; }
-  if (!D.fonte || !Object.keys(D.obras).length) {
-    kids.push(h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra cadastrada ainda" }),
-      h("p", { text: "Toque em “+ Nova obra” para cadastrar. Depois envie o link da obra para a equipe de campo conferir." }),
-      h("button", { class: "btn", style: "margin:10px auto 0", onclick: () => { UI.form = "nova"; render(); } }, "+ Nova obra")));
-    m.replaceChildren(...kids); return; }
   if (UI.obra && D.obras[UI.obra]) { m.replaceChildren(...kids, telaObra(D.obras[UI.obra])); return; }
   kids.push(kpis());
-  kids.push(h("div", { class: "tabs", role: "tablist" }, [["obras", "Obras"], ["mes", "Mês a mês"]].map(([k, t]) =>
+  kids.push(h("div", { class: "tabs", role: "tablist" }, [["obras", "Obras"], ["mes", "Mês a mês"], ["tec", "Técnicos"]].map(([k, t]) =>
     h("button", { role: "tab", "aria-selected": String(UI.aba === k), onclick: () => { UI.aba = k; render(); } }, t))));
-  kids.push(UI.aba === "mes" ? telaMes() : telaObras());
+  kids.push(UI.aba === "mes" ? telaMes() : UI.aba === "tec" ? telaTecnicos() : telaObras());
   m.replaceChildren(...kids); }
 
 function telaSenha(m) {
@@ -141,16 +136,22 @@ function kpis() {
     c(lista.filter(o => !o.dataRealMob && o.previsaoMob && dias(o.previsaoMob, hoje()) >= 0 && dias(o.previsaoMob, hoje()) <= 7 && resumo(o).pendMob > 0).length, "Mobilizam em 7 dias com pendência", "bad")); }
 
 function telaObras() {
+  if (!Object.keys(D.obras || {}).length) {
+    const semTec = !tecnicos().some(t => t.ativo !== false);
+    return h("div", { class: "vazio" }, h("h2", { text: semTec ? "Comece cadastrando os técnicos" : "Nenhuma obra cadastrada ainda" }),
+      h("p", { text: semTec ? "Cadastre os técnicos de campo na aba Técnicos. Depois cadastre as obras e escolha o técnico responsável de cada uma."
+        : "Toque em “+ Nova obra”, escolha o técnico responsável e envie o link da obra para ele." }),
+      h("button", { class: "btn", style: "margin:10px auto 0", onclick: () => { if (semTec) UI.aba = "tec"; else UI.form = "nova"; render(); } }, semTec ? "Cadastrar técnicos" : "+ Nova obra")); }
   const q = UI.busca.trim().toLowerCase();
   const lista = obras().map(o => ({ o, r: resumo(o) })).filter(({ o, r }) => {
       if (UI.filtro === "ativas") return !encerrada(o); if (UI.filtro === "naolib") return !encerrada(o) && r.lib.t === "NÃO LIBERADA";
       if (UI.filtro === "lib") return !encerrada(o) && r.lib.t === "LIBERADA"; if (UI.filtro === "mob") return r.lib.t === "MOBILIZADA";
       if (UI.filtro === "atras") return r.atras > 0; return true; })
-    .filter(({ o }) => !q || [o.id, o.nome, o.cliente, o.cidade, o.respEctas].join(" ").toLowerCase().includes(q));
+    .filter(({ o }) => !q || [o.id, o.nome, o.cliente, o.cidade, o.respEctas, o.tecnico].join(" ").toLowerCase().includes(q));
   const linhas = lista.map(({ o, r }) => { const falta = o.previsaoMob && !o.dataRealMob ? dias(o.previsaoMob, hoje()) : null;
     return h("tr", { class: "click", tabindex: "0", onclick: () => { UI.obra = o.id; render(); scrollTo(0, 0); }, onkeydown: e => { if (e.key === "Enter") { UI.obra = o.id; render(); } } },
       h("td", {}, h("span", { class: "code", text: o.id })), h("td", {}, h("b", { text: o.nome || "" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") })),
-      h("td", { text: o.respEctas || "" }), h("td", { class: "n", text: o.dataRealMob ? "✓ " + fmt(o.dataRealMob) : fmt(o.previsaoMob) }),
+      h("td", {}, o.tecnico ? o.tecnico : h("span", { class: "pill p-bad", text: "sem técnico" })), h("td", { class: "n", text: o.dataRealMob ? "✓ " + fmt(o.dataRealMob) : fmt(o.previsaoMob) }),
       h("td", { class: "n", text: falta == null ? "" : (falta >= 0 ? falta + "d" : (-falta) + "d atrás"), style: falta != null && falta <= 7 && r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
       h("td", { class: "n" }, pct(r.pct), h("span", { class: "mini" }, h("i", { style: "width:" + pct(r.pct) }))),
       h("td", { class: "n", text: r.pendMob, style: r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
@@ -161,12 +162,12 @@ function telaObras() {
         oninput: e => { UI.busca = e.target.value; const pos = e.target.selectionStart; render(); const b = $("#busca"); b.focus(); b.setSelectionRange(pos, pos); } }),
       h("div", { class: "chips" }, [["ativas", "Ativas"], ["naolib", "Não liberadas"], ["lib", "Liberadas"], ["mob", "Mobilizadas"], ["atras", "Com atraso"], ["todas", "Todas"]].map(([k, t]) =>
         h("button", { class: "chip", "aria-pressed": String(UI.filtro === k), onclick: () => { UI.filtro = k; render(); } }, t)))),
-    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Resp. ECTAS", "Mobilização", "Faltam", "Conferido", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: i >= 3 && i <= 7 ? "n" : "", text: t })))),
+    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Técnico (campo)", "Mobilização", "Faltam", "Conferido", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: i >= 3 && i <= 7 ? "n" : "", text: t })))),
       h("tbody", {}, linhas))) : h("p", { class: "vazio", text: "Nenhuma obra neste filtro." })); }
 
 function telaObra(o) {
   const r = resumo(o); const cats = [...new Set(itensAtivos().map(i => i.categoria))];
-  const info = [["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
+  const info = [["Técnico responsável (campo)", o.tecnico || "não definido"], ["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
     ["Data da verificação", fmt(o.dataVerificacao)], ["Previsão de mobilização", fmt(o.previsaoMob)], ["Mobilização real", fmt(o.dataRealMob)], ["Situação", o.situacao], ["Observações", o.obs]].filter(x => x[1]);
   const corpo = [];
   for (const c of cats) { corpo.push(h("tr", {}, h("td", { colspan: "7", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c })));
@@ -184,7 +185,7 @@ function telaObra(o) {
     h("button", { class: "more", style: "align-self:flex-start", onclick: () => { UI.obra = null; UI.link = null; render(); } }, "‹ Voltar para as obras"),
     blocoLink(o),
     h("div", { class: "row" },
-      h("button", { class: "btn wa", onclick: () => compartilharLink(o) }, "Enviar link da obra para a equipe"),
+      h("button", { class: "btn wa", onclick: () => compartilharLink(o) }, "Link da obra para o técnico"),
       h("button", { class: "btn sec", onclick: () => { UI.form = o.id; render(); scrollTo(0, 0); } }, "Editar dados da obra"),
       o.dataRealMob ? null : h("button", { class: "btn sec", onclick: () => salvarObra({ id: o.id, dataRealMob: hoje(), situacao: "Mobilizada" }, "Mobilização registrada") }, "Registrar mobilização hoje")),
     h("div", { class: "card", style: "display:flex;flex-direction:column;gap:12px" },
@@ -223,7 +224,11 @@ function telaForm(o) {
       f("id", "ID da obra", "text", { req: true, ph: "OBRA-014", ro: !!o }),
       h("label", { class: "f" }, "Situação", h("select", { id: "o-situacao", name: "situacao" }, SITUACOES.map(s => h("option", { value: s, selected: s === v.situacao || null }, s)))),
       f("nome", "Obra / empreendimento", "text", { req: true, full: true }), f("cliente", "Cliente"), f("cidade", "Cidade/UF", "text", { ph: "Joinville/SC" }),
-      f("modelo", "Modelo / tipo de ETE", "text", { full: true }), f("respEctas", "Responsável ECTAS"), f("contato", "Contato do cliente"),
+      f("modelo", "Modelo / tipo de ETE", "text", { full: true }), f("respEctas", "Responsável ECTAS"),
+      h("label", { class: "f" }, "Técnico responsável (campo)", h("select", { id: "o-tecnico", name: "tecnico", required: true },
+        h("option", { value: "" }, tecnicos().some(t => t.ativo !== false) ? "Escolha o técnico" : "Cadastre um técnico na aba Técnicos"),
+        tecnicos().filter(t => t.ativo !== false || t.nome === v.tecnico).map(t => h("option", { value: t.nome, selected: t.nome === v.tecnico || null }, t.nome)))),
+      f("contato", "Contato do cliente"),
       f("telefone", "Telefone / e-mail", "text", { full: true }), f("dataVerificacao", "Data da verificação", "date"), f("previsaoMob", "Previsão de mobilização", "date"),
       f("dataRealMob", "Data real de mobilização", "date"),
       h("label", { class: "f full" }, "Observações gerais", h("textarea", { id: "o-obs", name: "obs" }, v.obs || "")),
@@ -243,27 +248,84 @@ async function salvarObra(d, aviso) {
 // lista de itens usada antes de importar o primeiro Excel (a mesma do app de campo)
 function ITENS_BASE() { return (window.ITENS_CAMPO || []).map(r => ({ codigo: r[0], categoria: r[1], item: r[2], etapa: r[3], referencia: r[4], ativo: true })); }
 
-/* ---------- link da obra para a equipe ---------- */
-function linkObra(o) {
-  const campos = ["id", "nome", "cliente", "cidade", "modelo", "respEctas", "contato", "telefone", "dataVerificacao", "previsaoMob", "situacao", "obs"];
+/* ---------- técnicos ---------- */
+const tecnicos = () => (D.tecnicos || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
+const tecnicoDe = nome => (D.tecnicos || []).find(t => t.nome === nome) || null;
+const novoCodigo = () => { const usados = new Set((D.tecnicos || []).map(t => t.codigo)); let c; do { c = String(100000 + Math.floor(Math.random() * 900000)); } while (usados.has(c)); return c; };
+async function salvarTecnico(t, aviso) {
+  UI.erro = "";
+  if (CENTRAL.url) {
+    try { await api({ acao: "supSalvarTecnico", tecnico: t }); toast(aviso); await carregarCentral(); return true; }
+    catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : (e.message && e.message !== "erro" ? e.message : "Sem conexão com a central."); render(); return false; } }
+  const lista = (D.tecnicos || []).filter(x => x.nome !== (t.nomeAntigo || t.nome));
+  if (lista.some(x => x.codigo === t.codigo)) { UI.erro = "Este código já é de outro técnico."; render(); return false; }
+  const novo = { nome: t.nome, codigo: t.codigo, telefone: t.telefone || "", ativo: t.ativo !== false };
+  D.tecnicos = [...lista, novo];
+  if (t.nomeAntigo && t.nomeAntigo !== t.nome) for (const o of Object.values(D.obras)) if (o.tecnico === t.nomeAntigo) o.tecnico = t.nome;
+  if (!D.fonte) D.fonte = "arquivos";
+  gravar("sup-dados", D); toast(aviso); render(); return true; }
+const foneWa = t => String((t && t.telefone) || "").replace(/\D/g, "").replace(/^(?!55)(\d{10,11})$/, "55$1");
+function telaTecnicos() {
+  const msg = h("span", { class: "meta" });
+  const form = h("form", { class: "card form", onsubmit: async e => { e.preventDefault();
+      const nome = $("#t-nome").value.trim(), codigo = $("#t-cod").value.trim(), telefone = $("#t-fone").value.trim();
+      if (!nome) return; if (!/^\d{4,8}$/.test(codigo)) { msg.textContent = "O código tem de 4 a 8 números."; return; }
+      if (tecnicoDe(nome)) { msg.textContent = "Já existe um técnico com esse nome."; return; }
+      if (await salvarTecnico({ nome, codigo, telefone, ativo: true }, "Técnico cadastrado")) { $("#t-nome").value = ""; $("#t-fone").value = ""; $("#t-cod").value = novoCodigo(); } } },
+    h("div", { class: "full", style: "font-weight:700", text: "Cadastrar técnico de campo" }),
+    h("label", { class: "f" }, "Nome", h("input", { id: "t-nome", required: true, autocomplete: "off" })),
+    h("label", { class: "f" }, "Telefone (WhatsApp)", h("input", { id: "t-fone", inputmode: "tel", placeholder: "(47) 99999-0000" })),
+    h("label", { class: "f" }, "Código pessoal", h("input", { id: "t-cod", required: true, inputmode: "numeric", value: novoCodigo(), maxlength: "8" })),
+    h("div", { class: "row", style: "align-items:flex-end" }, h("button", { class: "btn", type: "submit" }, "Cadastrar técnico"), msg));
+  const linhas = tecnicos().map(t => { const n = Object.values(D.obras).filter(o => o.tecnico === t.nome && !encerrada(o)).length;
+    const txt = `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nCódigo pessoal: ${t.codigo}\nNão compartilhe este código.`;
+    return h("tr", { style: t.ativo === false ? "opacity:.55" : "" }, h("td", {}, h("b", { text: t.nome })), h("td", { text: t.telefone || "" }),
+      h("td", { class: "n" }, h("span", { class: "code", text: t.codigo })), h("td", { class: "n", text: n }),
+      h("td", {}, h("div", { class: "row" },
+        h("a", { class: "btn wa", style: "padding:7px 10px;font-size:12px", href: "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(txt), target: "_blank", rel: "noopener" }, "Enviar acesso"),
+        h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarTecnico({ ...t, codigo: novoCodigo(), nomeAntigo: t.nome }, "Novo código gerado. Envie para o técnico.") }, "Gerar novo código"),
+        h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarTecnico({ ...t, ativo: t.ativo === false, nomeAntigo: t.nome }, t.ativo === false ? "Técnico reativado" : "Técnico desativado") }, t.ativo === false ? "Reativar" : "Desativar")))); });
+  return h("div", { style: "display:flex;flex-direction:column;gap:12px" },
+    h("p", { class: "meta", style: "margin:0", text: "Cada técnico entra no app de campo com o código pessoal dele e só vê as obras em que é o responsável. Um técnico desativado perde o acesso." }),
+    form,
+    linhas.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Técnico", "Telefone", "Código", "Obras ativas", ""].map((t, i) => h("th", { class: i === 2 || i === 3 ? "n" : "", text: t })))), h("tbody", {}, linhas)))
+      : h("p", { class: "vazio", text: "Nenhum técnico cadastrado ainda." })); }
+
+/* ---------- link da obra para o técnico responsável ---------- */
+const b64u = b => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+async function fecharPacote(dados, codigo) {   // cifra a obra com o código pessoal do técnico: só ele abre o link
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(codigo), "PBKDF2", false, ["deriveKey"]);
+  const chave = await crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 150000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  const c = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, chave, new TextEncoder().encode(JSON.stringify(dados)));
+  return { s: b64u(salt), i: b64u(iv), c: b64u(c) }; }
+const cacheLink = {};
+async function linkObra(o) {
+  if (CENTRAL.url) return APP_CAMPO + "#obra-" + o.id;   // com a central, a obra já chega só para o técnico responsável
+  const t = tecnicoDe(o.tecnico); if (!t) throw new Error("sem técnico");
+  const campos = ["id", "nome", "cliente", "cidade", "modelo", "respEctas", "contato", "telefone", "dataVerificacao", "previsaoMob", "situacao", "obs", "tecnico"];
   const dados = {}; for (const k of campos) if (o[k]) dados[k] = o[k];
-  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(dados)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return APP_CAMPO + "#o=" + b64; }
+  const chave = JSON.stringify(dados) + "|" + t.codigo;
+  if (cacheLink[o.id] && cacheLink[o.id].k === chave) return cacheLink[o.id].url;
+  const pac = { t: t.nome, ...(await fecharPacote(dados, t.codigo)) };
+  const url = APP_CAMPO + "#o=" + b64u(new TextEncoder().encode(JSON.stringify(pac)));
+  cacheLink[o.id] = { k: chave, url }; return url; }
+const textoLink = o => `Checklist de pré-instalação: ${o.id} ${o.nome || ""}\nObra liberada para ${o.tecnico}. Abra o link e entre com o seu código pessoal:`;
 async function compartilharLink(o) {
-  const url = linkObra(o), texto = `Checklist de pré-instalação: ${o.id} ${o.nome || ""}\nAbra o link para conferir os itens da obra:`;
-  try { if (navigator.share) { await navigator.share({ title: "Checklist " + o.id, text: texto, url }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
-  UI.link = o.id; render();
-  try { await navigator.clipboard.writeText(texto + "\n" + url); toast("Link copiado. Cole no WhatsApp da equipe."); } catch (e) { } }
+  if (!tecnicoDe(o.tecnico)) { toast("Escolha o técnico responsável antes de enviar o link."); UI.form = o.id; render(); return; }
+  UI.link = o.id; render(); }
 function blocoLink(o) {
   if (UI.link !== o.id) return null;
-  const url = linkObra(o);
-  const inp = h("input", { class: "busca", id: "link-obra", readonly: true, value: url, onfocus: e => e.target.select() });
+  const t = tecnicoDe(o.tecnico);
+  const inp = h("input", { class: "busca", id: "link-obra", readonly: true, value: "Gerando o link…", onfocus: e => e.target.select() });
+  const wa = h("a", { class: "btn wa", target: "_blank", rel: "noopener" }, "Enviar no WhatsApp para " + (t ? t.nome : ""));
+  linkObra(o).then(url => { inp.value = url; wa.href = "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(textoLink(o) + "\n" + url); })
+    .catch(() => { inp.value = "Escolha o técnico responsável da obra."; });
   return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px;border-color:var(--teal)" },
-    h("b", { text: "Link da obra para a equipe de campo" }),
-    h("p", { class: "meta", style: "margin:0", text: "Envie este link pelo WhatsApp. O técnico toca nele e a obra aparece no app, pronta para conferir." }),
+    h("b", { text: "Link da obra para " + (t ? t.nome : "o técnico") }),
+    h("p", { class: "meta", style: "margin:0", text: "O link só abre no app do técnico responsável, com o código pessoal dele. Outra pessoa que receber o link não consegue abrir a obra." }),
     inp, h("div", { class: "row" },
-      h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(url); toast("Link copiado"); } catch (e) { inp.focus(); inp.select(); toast("Selecione e copie o link"); } } }, "Copiar link"),
-      h("a", { class: "btn wa", href: "https://wa.me/?text=" + encodeURIComponent(`Checklist de pré-instalação: ${o.id} ${o.nome || ""}\n${url}`), target: "_blank", rel: "noopener" }, "Abrir no WhatsApp"))); }
+      h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(textoLink(o) + "\n" + inp.value); toast("Link copiado"); } catch (e) { inp.focus(); inp.select(); toast("Selecione e copie o link"); } } }, "Copiar link"), wa)); }
 
 /* ---------- mês a mês ---------- */
 function calcMes(ano) {
@@ -311,10 +373,10 @@ function grafico(linhas) {
 /* ---------- exportar consolidado ---------- */
 function exportar() {
   const d = s => s ? new Date(s + "T12:00:00") : "";
-  const O = [["ID Obra", "Obra / Empreendimento", "Cliente", "Cidade/UF", "Modelo / Tipo de ETE", "Responsável ECTAS", "Contato do cliente", "Telefone / E-mail", "Data da verificação", "Previsão de mobilização", "Data real de mobilização", "Situação da obra", "Observações gerais", "% concluído", "Pendências p/ mobilização", "Itens atrasados", "Liberação p/ mobilização"]];
+  const O = [["ID Obra", "Obra / Empreendimento", "Cliente", "Cidade/UF", "Modelo / Tipo de ETE", "Responsável ECTAS", "Técnico responsável", "Contato do cliente", "Telefone / E-mail", "Data da verificação", "Previsão de mobilização", "Data real de mobilização", "Situação da obra", "Observações gerais", "% conferido", "Pendências p/ mobilização", "Itens atrasados", "Liberação p/ mobilização"]];
   const R = [["ID Obra", "Código item", "Categoria", "Item de verificação", "Etapa limite", "Status", "Parte responsável", "Responsável (nome)", "Data prevista", "Data conclusão", "Situação do prazo", "Evidência (link foto/doc)", "Observações / Pendências", "Última atualização", "Atualizado por"]];
   for (const o of obras()) { const r = resumo(o);
-    O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs, r.pct, r.pendMob, r.atras, r.lib.t].map(x => x == null ? "" : x));
+    O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.tecnico, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs, r.pct, r.pendMob, r.atras, r.lib.t].map(x => x == null ? "" : x));
     for (const it of itensAtivos()) { const g = reg(o, it.codigo);
       R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, g.status || "Pendente", g.parte || "", g.resp || "", d(g.prev), d(g.concl), situacaoPrazo(g), g.link || "", g.obs || "", g.em ? new Date(g.em) : "", g.por || ""]); } }
   const { linhas, tot } = calcMes(UI.ano);
@@ -323,7 +385,7 @@ function exportar() {
   M.push(["TOTAL " + UI.ano, tot.prev, tot.mob, tot.mobPrazo, tot.prazoMes, tot.conc, tot.noPrazo, tot.atraso, tot.atrasados]);
   const wb = XLSX.utils.book_new(), opt = { cellDates: true, dateNF: "dd/mm/yyyy" };
   const w1 = XLSX.utils.aoa_to_sheet(O, opt), w2 = XLSX.utils.aoa_to_sheet(R, opt), w3 = XLSX.utils.aoa_to_sheet(M);
-  w1["!cols"] = [12, 32, 24, 16, 22, 20, 20, 22, 13, 13, 13, 18, 40, 11, 12, 11, 16].map(w => ({ wch: w })); w2["!cols"] = [12, 10, 13, 52, 13, 14, 13, 20, 12, 12, 20, 26, 42, 16, 18].map(w => ({ wch: w })); w3["!cols"] = [14, 14, 12, 12, 12, 12, 12, 12, 12].map(w => ({ wch: w }));
+  w1["!cols"] = [12, 32, 24, 16, 22, 20, 20, 20, 22, 13, 13, 13, 18, 40, 11, 12, 11, 16].map(w => ({ wch: w })); w2["!cols"] = [12, 10, 13, 52, 13, 14, 13, 20, 12, 12, 20, 26, 42, 16, 18].map(w => ({ wch: w })); w3["!cols"] = [14, 14, 12, 12, 12, 12, 12, 12, 12].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, w1, "OBRAS"); XLSX.utils.book_append_sheet(wb, w2, "REGISTRO"); XLSX.utils.book_append_sheet(wb, w3, "MES A MES " + UI.ano);
   XLSX.writeFile(wb, `Checklist_ECTAS_consolidado_${hoje()}.xlsx`, { cellDates: true }); }
 

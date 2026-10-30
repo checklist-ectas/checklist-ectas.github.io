@@ -64,12 +64,13 @@ function resumo(o) { let apl = 0, conc = 0, pendMob = 0, atras = 0;
 
 /* obra como o celular a vê: cópia da central + alterações locais ainda não enviadas */
 function obraView(id) {
-  const base = E.obras[id] || LK[id], loc = P.obras[id];
+  const base = E.obras[id] || (LK[id] && LK[id]._cod === C.codigo ? LK[id] : null), loc = null;
   if (!base && !loc) return null;
   const o = { ...(base || {}), ...(loc || {}), id, checklist: { ...((base || {}).checklist || {}) } };
   for (const p of Object.values(P.itens)) if (p.obra === id) o.checklist[p.cod] = { ...(o.checklist[p.cod] || {}), ...p.dados };
   return o; }
-const idsObras = () => [...new Set([...Object.keys(E.obras), ...Object.keys(LK), ...Object.keys(P.obras)])];
+const minhaLK = () => Object.keys(LK).filter(id => LK[id]._cod === C.codigo);
+const idsObras = () => [...new Set([...Object.keys(E.obras), ...minhaLK()])];
 const nPend = () => Object.keys(P.obras).length + Object.keys(P.itens).length;
 
 /* ---------- alterações ---------- */
@@ -112,9 +113,7 @@ async function sincronizar() {
       trocarFoto(f.obra, f.cod, f.key, "d:" + r.id);
     }
     // 2. obras
-    const po = { ...P.obras };
-    if (Object.keys(po).length) { await api({ acao: "salvarObras", obras: Object.values(po) });
-      for (const [k, v] of Object.entries(po)) if (P.obras[k] === v) delete P.obras[k]; salvarP(); }
+    if (Object.keys(P.obras).length) { P.obras = {}; salvarP(); }   // obras são cadastradas só pelo supervisor
     // 3. itens (fotos ainda não enviadas ficam para a próxima rodada)
     const pi = Object.entries(P.itens).filter(([, v]) => !(v.dados.fotos || []).some(f => f.startsWith("l:")));
     if (pi.length) { await api({ acao: "salvarItens", mudancas: pi.map(([, v]) => v) });
@@ -140,7 +139,7 @@ setInterval(() => { if (nPend()) sincronizar(); }, 60000);
 /* ---------- navegação ---------- */
 function lerHash() { const x = decodeURIComponent(location.hash.slice(1));
   if (x.startsWith("obra-")) return { v: "obra", id: x.slice(5) };
-  if (x.startsWith("o=")) { const id = receberObraDoLink(x.slice(2)); history.replaceState(null, "", id ? "#obra-" + id : location.pathname); return id ? { v: "obra", id } : { v: "lista" }; }
+  if (x.startsWith("o=")) { try { localStorage.setItem("ck-link", x.slice(2)); } catch (e) { } history.replaceState(null, "", location.pathname); setTimeout(processarLink, 0); return { v: "lista" }; }
   if (x === "config") return { v: "config" };
   return { v: "lista" }; }
 function ir(hash) { if ((location.hash || "#") === "#" + hash) { UI.rota = lerHash(); render(); } else location.hash = hash; scrollTo(0, 0); }
@@ -159,7 +158,7 @@ function render() {
   const ae = document.activeElement;
   if (ae && ae.id !== "busca" && $("#main").contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.type !== "file") { sujo = true; return; }
   sujo = false; $("#fab").replaceChildren(); pintarSync();
-  if (CENTRAL.url && !C.codigo) return telaEntrada();
+  if (!C.codigo) return telaEntrada();
   const r = UI.rota;
   if (r.v === "obra") return telaObra(r.id);
   if (r.v === "config") return telaConfig();
@@ -167,19 +166,24 @@ function render() {
 document.addEventListener("focusout", () => setTimeout(() => { if (sujo) render(); }, 0));
 
 function telaEntrada() {
-  topo("Checklist de Pré-Instalação", "Primeiro acesso");
+  topo("Checklist de Pré-Instalação", "Acesso do técnico");
   const msg = h("p", { class: "meta", id: "ent-msg" });
   const f = h("form", { class: "card ent", onsubmit: async e => { e.preventDefault();
-      const cod = $("#e-cod").value.trim(), nome = $("#e-nome").value.trim(); if (!cod || !nome) return;
-      msg.textContent = "Conferindo o código…";
-      try { const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ acao: "ping", codigo: cod }) }).then(x => x.json());
-        if (!r.codigoOk) { msg.textContent = "Código incorreto. Confira com o responsável pelo checklist."; return; }
-      } catch (err) { msg.textContent = "Sem internet agora. O código será conferido na próxima conexão."; }
-      C = { codigo: cod, autor: nome }; salvarC(); ir(""); sincronizar(); } },
-    h("h2", { text: "Bem-vindo ao checklist" }),
-    h("p", { class: "meta", text: "Digite o código da equipe que você recebeu e o seu nome. Isso é pedido só uma vez neste celular." }),
-    h("label", { class: "f" }, "Código da equipe", h("input", { id: "e-cod", required: true, autocomplete: "off", autocapitalize: "off", value: C.codigo || "" })),
-    h("label", { class: "f" }, "Seu nome", h("input", { id: "e-nome", required: true, autocomplete: "name", value: C.autor || "" })),
+      const cod = $("#e-cod").value.trim(), nomeEl = $("#e-nome"), nome = nomeEl ? nomeEl.value.trim() : "";
+      if (!/^\d{4,8}$/.test(cod)) { msg.textContent = "O código pessoal tem de 4 a 8 números."; return; }
+      let autor = nome;
+      if (CENTRAL.url) { msg.textContent = "Conferindo o código…";
+        try { const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ acao: "ping", codigo: cod }) }).then(x => x.json());
+          if (!r.codigoOk) { msg.textContent = "Código não encontrado. Confira com o supervisor."; return; }
+          autor = r.tecnico;
+        } catch (err) { msg.textContent = "Sem internet agora. Conecte-se para entrar pela primeira vez."; return; } }
+      else if (!nome) { msg.textContent = "Digite o seu nome."; return; }
+      if (C.codigo !== cod) { E = { obras: {}, itens: E.itens, ultimaSync: null, planilha: "" }; salvarE(); }
+      C = { codigo: cod, autor }; salvarC(); ir(""); processarLink(); sincronizar(); } },
+    h("h2", { text: "Acesso do técnico" }),
+    h("p", { class: "meta", text: "Digite o seu código pessoal (o supervisor envia para você). Você vai ver só as obras liberadas para você." }),
+    CENTRAL.url ? null : h("label", { class: "f" }, "Seu nome", h("input", { id: "e-nome", required: true, autocomplete: "name", value: C.autor || "" })),
+    h("label", { class: "f" }, "Código pessoal", h("input", { id: "e-cod", required: true, inputmode: "numeric", autocomplete: "off", maxlength: "8", pattern: "[0-9]*" })),
     h("button", { class: "btn", type: "submit" }, "Entrar"), msg);
   $("#main").replaceChildren(f); }
 
@@ -195,13 +199,25 @@ function avisoInstalar() {
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); UI.instalar = e; render(); });
 
 /* ---------- obras recebidas por link do supervisor ---------- */
-function decodificarObra(b64) {
-  const s = b64.replace(/-/g, "+").replace(/_/g, "/"); const pad = s + "===".slice((s.length + 3) % 4);
-  return JSON.parse(decodeURIComponent(escape(atob(pad)))); }
-function receberObraDoLink(cod) {
-  try { const o = decodificarObra(cod); const id = String(o.id || "").toUpperCase(); if (!/^[A-Z0-9-]+$/.test(id)) throw new Error("id");
-    LK[id] = { ...(LK[id] || {}), ...o, id }; salvarLK(); toast("Obra " + id + " recebida"); return id;
-  } catch (e) { toast("Link de obra inválido. Peça um novo link ao supervisor."); return null; } }
+const b64u = { de: t => { const s = t.replace(/-/g, "+").replace(/_/g, "/"); return Uint8Array.from(atob(s + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0)); } };
+async function abrirPacote(pac, codigo) {   // o link da obra vem cifrado com o código pessoal do técnico
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(codigo), "PBKDF2", false, ["deriveKey"]);
+  const chave = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64u.de(pac.s), iterations: 150000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const txt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64u.de(pac.i) }, chave, b64u.de(pac.c));
+  return JSON.parse(new TextDecoder().decode(txt)); }
+async function processarLink() {
+  let cod = null; try { cod = localStorage.getItem("ck-link"); } catch (e) { }
+  if (!cod || !C.codigo) return;
+  try { localStorage.removeItem("ck-link"); } catch (e) { }
+  let pac; try { pac = JSON.parse(new TextDecoder().decode(b64u.de(cod))); } catch (e) { toast("Link de obra inválido. Peça um novo link ao supervisor."); return; }
+  let o; try { o = await abrirPacote(pac, C.codigo); }
+  catch (e) { telaBloqueada(pac.t); return; }
+  const id = String(o.id || "").toUpperCase(); if (!/^[A-Z0-9-]+$/.test(id)) { toast("Link de obra inválido."); return; }
+  LK[id] = { ...(LK[id] || {}), ...o, id, _cod: C.codigo }; salvarLK(); toast("Obra " + id + " liberada para você"); ir("obra-" + id); }
+function telaBloqueada(tecnico) {
+  topo("Checklist de Pré-Instalação", "Obra não liberada", "");
+  $("#main").replaceChildren(h("div", { class: "card vazio" }, h("h2", { text: "Esta obra não está liberada para você" }),
+    h("p", { text: tecnico ? `Ela foi liberada para ${tecnico}. Se a obra deveria ser sua, peça ao supervisor para trocar o técnico responsável.` : "Peça ao supervisor para liberar a obra para você." }))); }
 
 function telaLista() {
   topo("Checklist de Pré-Instalação", (C.autor ? C.autor + " · " : "") + "Minhas obras", null, [h("button", { onclick: () => ir("config") }, "Mais")]);
@@ -319,17 +335,15 @@ async function mostrarFoto(ref, ph) {
 function telaConfig() {
   topo("Mais opções", C.autor || "", "");
   const kids = [
-    h("button", { class: "btn wa", onclick: () => exportarExcel() }, "Exportar todas as obras (Excel)"),
-    h("p", { class: "meta", text: "O Excel sai com as abas OBRAS e REGISTRO no formato da planilha de controle: é só colar." })];
-  if (CENTRAL.url) {
-    kids.push(h("div", { class: "card" }, h("b", { text: "Central" }),
+    h("div", { class: "card" }, h("b", { text: "Técnico" }), h("p", { class: "meta", style: "margin:4px 0 0", text: (C.autor || "") + " · você vê só as obras liberadas para você." })),
+    h("button", { class: "btn wa", onclick: () => exportarExcel() }, "Exportar minhas obras (Excel)"),
+    h("p", { class: "meta", text: "O Excel sai com as abas OBRAS e REGISTRO, para o supervisor importar no painel." })];
+  if (CENTRAL.url) kids.push(h("div", { class: "card" }, h("b", { text: "Central" }),
       h("p", { class: "meta", text: E.ultimaSync ? "Última sincronização: " + new Date(E.ultimaSync).toLocaleString("pt-BR") : "Ainda não sincronizou." }),
       h("p", { class: "meta", text: nPend() ? nPend() + " alteração(ões) aguardando envio." : "Nada pendente neste celular." }),
       h("button", { class: "btn sec", onclick: () => sincronizar() }, "Sincronizar agora")));
-    kids.push(h("div", { class: "card" }, h("b", { text: "Seu nome" }),
-      h("input", { class: "busca", id: "cfg-nome", value: C.autor, onchange: e => { C.autor = e.target.value.trim(); salvarC(); toast("Nome salvo"); } })));
-    kids.push(h("button", { class: "btn sec", onclick: () => { if (nPend()) { toast("Sincronize antes de sair: há alterações não enviadas."); return; } C = { codigo: "", autor: C.autor }; salvarC(); ir(""); } }, "Trocar código da equipe"));
-  } else kids.push(h("div", { class: "notice", text: "Este app está no modo só neste celular. Os dados ficam salvos aqui; envie o PDF ou o Excel para o escritório." }));
+  else kids.push(h("div", { class: "notice", text: "Os dados ficam salvos neste celular. Envie o PDF ou o Excel ao supervisor." }));
+  kids.push(h("button", { class: "btn sec", onclick: () => { if (CENTRAL.url && nPend()) { toast("Sincronize antes de sair: há alterações não enviadas."); return; } C = { codigo: "", autor: "" }; salvarC(); ir(""); } }, "Sair (trocar de técnico)"));
   kids.push(h("p", { class: "meta", style: "text-align:center", text: "Checklist de Pré-Instalação ECTAS · " + itensAtivos().length + " itens padrão" }));
   $("#main").replaceChildren(...kids); }
 
@@ -343,16 +357,16 @@ async function entregar(blob, nome, texto) {
 function exportarExcel() {
   if (!window.XLSX) { toast("Aguarde o app terminar de carregar."); return; }
   const d = s => s ? new Date(s + "T12:00:00") : "";
-  const O = [["ID Obra", "Obra / Empreendimento", "Cliente", "Cidade/UF", "Modelo / Tipo de ETE", "Responsável ECTAS", "Contato do cliente", "Telefone / E-mail", "Data da verificação", "Previsão de mobilização", "Data real de mobilização", "Situação da obra", "Observações gerais"]];
+  const O = [["ID Obra", "Obra / Empreendimento", "Cliente", "Cidade/UF", "Modelo / Tipo de ETE", "Responsável ECTAS", "Técnico responsável", "Contato do cliente", "Telefone / E-mail", "Data da verificação", "Previsão de mobilização", "Data real de mobilização", "Situação da obra", "Observações gerais"]];
   const R = [["ID Obra", "Código item", "Categoria", "Item de verificação", "Etapa limite", "Status", "Parte responsável", "Responsável (nome)", "Data prevista", "Data conclusão", "Evidência (link foto/doc)", "Observações / Pendências", "Última atualização", "Atualizado por"]];
   for (const o of idsObras().sort().map(obraView)) {
-    O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs].map(x => x == null ? "" : x));
+    O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.tecnico || C.autor, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs].map(x => x == null ? "" : x));
     for (const it of itensAtivos()) { const r = reg(o, it.codigo);
       R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, r.status || "Pendente", r.parte || "", r.resp || "", d(r.prev), d(r.concl),
         [r.link, (r.fotos || []).length ? r.fotos.length + " foto(s)" : ""].filter(Boolean).join(" | "), r.obs || "", r.em ? new Date(r.em) : "", r.por || ""]); } }
   const wb = XLSX.utils.book_new();
   const w1 = XLSX.utils.aoa_to_sheet(O, { cellDates: true, dateNF: "dd/mm/yyyy" }), w2 = XLSX.utils.aoa_to_sheet(R, { cellDates: true, dateNF: "dd/mm/yyyy" });
-  w1["!cols"] = [12, 32, 24, 16, 22, 20, 20, 22, 13, 13, 13, 18, 40].map(w => ({ wch: w })); w2["!cols"] = [12, 10, 13, 52, 13, 14, 13, 20, 12, 12, 26, 42, 16, 18].map(w => ({ wch: w }));
+  w1["!cols"] = [12, 32, 24, 16, 22, 20, 20, 20, 22, 13, 13, 13, 18, 40].map(w => ({ wch: w })); w2["!cols"] = [12, 10, 13, 52, 13, 14, 13, 20, 12, 12, 26, 42, 16, 18].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, w1, "OBRAS"); XLSX.utils.book_append_sheet(wb, w2, "REGISTRO");
   const buf = XLSX.write(wb, { type: "array", bookType: "xlsx", cellDates: true });
   entregar(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `Checklist_ECTAS_${hoje()}.xlsx`, "Checklist de pré-instalação ECTAS"); }
@@ -402,5 +416,5 @@ async function enviarPdf(o) {
 
 /* ---------- início ---------- */
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => { });
-UI.rota = lerHash(); render();
+UI.rota = lerHash(); render(); processarLink();
 if (!CENTRAL.url) setSync("Salvo neste celular. Envie o PDF ou o Excel ao supervisor."); else sincronizar();
