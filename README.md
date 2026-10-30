@@ -1,6 +1,6 @@
 # Checklist de Pré-Instalação ECTAS
 
-App: **https://gabriel7890-ux.github.io/checklist-ectas/**
+App: **https://checklist-ectas.github.io**
 
 Checklist de pré-instalação preenchido no celular pela equipe de campo: status de cada item, responsável, prazos, observações e fotos.
 Mostra se a obra está **LIBERADA** para mobilização (todos os itens da etapa Mobilização concluídos ou não aplicáveis).
