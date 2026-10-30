@@ -75,6 +75,7 @@ const nPend = () => Object.keys(P.obras).length + Object.keys(P.itens).length;
 
 /* ---------- alterações ---------- */
 function alterarItem(obra, cod, patch) {
+  if (enviado(obraView(obra))) { toast("Checklist já enviado ao supervisor. Só muda se ele devolver para correção."); return; }
   const atual = reg(obraView(obra), cod);
   const dados = { ...atual, ...patch, em: new Date().toISOString(), por: C.autor || "" };
   P.itens[obra + "|" + cod] = { obra, cod, dados }; salvarP(); render(); agendarSync(); }
@@ -216,7 +217,9 @@ async function processarLink() {
   catch (e) { telaBloqueada(pac.t); return; }
   const id = String(o.id || "").toUpperCase(); if (!/^[A-Z0-9-]+$/.test(id)) { toast("Link de obra inválido."); return; }
   if (Array.isArray(o.itens)) o.itens = o.itens.map(r => ({ codigo: r[0], categoria: r[1], item: r[2], etapa: r[3] || "Mobilização", referencia: r[4] || "", ativo: true }));
-  LK[id] = { ...(LK[id] || {}), ...o, id, _cod: C.codigo }; salvarLK(); toast("Obra " + id + " liberada para você"); ir("obra-" + id); }
+  LK[id] = { ...(LK[id] || {}), ...o, id, _cod: C.codigo };
+  if (o.analise === "Devolvido") delete LK[id].enviadoCampo;   // supervisor devolveu para correção
+  salvarLK(); toast("Obra " + id + " liberada para você"); ir("obra-" + id); }
 function telaBloqueada(tecnico) {
   topo("Checklist de Pré-Instalação", "Obra não liberada", "");
   $("#main").replaceChildren(h("div", { class: "card vazio" }, h("h2", { text: "Esta obra não está liberada para você" }),
@@ -247,8 +250,8 @@ function desenharLista() {
   box.replaceChildren(...lista.map(o => { const r = resumoCampo(o);
     return h("button", { class: "card obra", onclick: () => ir("obra-" + o.id) },
       h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "grow" }),
-        planejamento(o).liberada ? h("span", { class: "pill " + (r.vazio ? "p-warn" : r.nao ? "p-bad" : "p-ok"), text: r.vazio ? r.vazio + " sem resposta" : r.nao ? r.nao + " com Não" : "Tudo Sim" })
-          : h("span", { class: "pill p-na", text: "Aguardando autorização" })),
+        !planejamento(o).liberada ? h("span", { class: "pill p-na", text: "Aguardando autorização" })
+          : (() => { const e = etapaEnvio(o); return e ? h("span", { class: "pill " + e.c, text: e.t }) : h("span", { class: "pill " + (r.vazio ? "p-warn" : "p-mob"), text: r.vazio ? r.vazio + " sem resposta" : "Pronto para enviar" }); })()),
       h("h3", { text: o.nome || "(sem nome)" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") }),
       h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
       h("div", { class: "row meta" }, h("span", { text: `${r.sim + r.nao} de ${r.total} respondidos · ${r.sim} Sim · ${r.nao} Não` }), h("span", { class: "grow" }),
@@ -261,6 +264,14 @@ const itensCampo = o => itensAtivos(o).filter(it => !ehPlanejamento(it));
 function planejamento(o) { const its = itensAtivos(o).filter(ehPlanejamento);
   const ok = its.filter(it => ["Concluído", "Não aplicável"].includes(reg(o, it.codigo).status)).length;
   return { total: its.length, ok, liberada: !!o.liberadoCampo }; }   // liberada só com a autorização enviada pelo supervisor
+/* Envio ao supervisor: depois de enviado o checklist fica só para leitura, até o supervisor devolver */
+const enviado = o => !!(o && o.enviadoCampo);
+const dataHora = t => t ? new Date(t).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+function etapaEnvio(o) {
+  if (o.analise === "Aprovado" && enviado(o)) return { t: "Aprovado pelo supervisor", c: "p-ok" };
+  if (enviado(o)) return { t: "Enviado · em análise", c: "p-mob" };
+  if (o.analise === "Devolvido") return { t: "Devolvido para correção", c: "p-bad" };
+  return null; }
 /* Lista de checagem: Sim = "Concluído", Não = "Pendente" (status da planilha), sem resposta = vazio */
 const resposta = r => r.status === "Concluído" ? "sim" : r.status ? "nao" : "";
 function resumoCampo(o) { let sim = 0, nao = 0, total = 0, mob = 0;
@@ -280,38 +291,92 @@ function telaObra(id) {
       CENTRAL.url ? h("button", { class: "btn sec", style: "margin:8px auto 0", onclick: () => sincronizar() }, "Verificar de novo") : h("p", { class: "meta", text: "Peça ao supervisor o link atualizado depois que ele concluir o planejamento." })));
     return; }
   const its = itensCampo(o).filter(i => reg(o, i.codigo).status !== "Não aplicável"), cats = [...new Set(its.map(i => i.categoria))];
+  const est = etapaEnvio(o);
+  const aviso = enviado(o)
+    ? h("div", { class: "notice " + (o.analise === "Aprovado" ? "ok" : ""), text: o.analise === "Aprovado"
+        ? `Checklist aprovado pelo supervisor em ${dataHora(o.analiseEm)}.` + (o.analiseObs ? " Comentário: " + o.analiseObs : "")
+        : `Checklist enviado ao supervisor em ${dataHora(o.enviadoCampo)}. Aguardando a análise. As respostas ficam só para leitura.` })
+    : o.analise === "Devolvido" ? h("div", { class: "notice erro", text: "Devolvido para correção pelo supervisor" + (o.analiseObs ? ": " + o.analiseObs : ".") + " Corrija e envie de novo na aba Enviar." }) : null;
   const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
-    h("div", { class: "meta", text: [o.cliente, o.cidade, o.modelo].filter(Boolean).join(" · ") }),
+    h("div", { class: "row" }, h("div", { class: "meta grow", text: [o.cliente, o.cidade, o.modelo].filter(Boolean).join(" · ") }), est ? h("span", { class: "pill " + est.c, text: est.t }) : null),
     o.previsaoMob || o.respEctas ? h("div", { class: "meta", text: [o.previsaoMob ? "Mobilização prevista " + fmt(o.previsaoMob) : "", o.respEctas ? "Responsável ECTAS: " + o.respEctas : ""].filter(Boolean).join(" · ") }) : null,
-    h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
+    h("div", { class: "prog" }, h("i", { style: `width:${Math.round((r.sim + r.nao) / (r.total || 1) * 100)}%` })),
     h("div", { class: "stats", style: "grid-template-columns:repeat(3,1fr)" },
       h("div", { class: "stat" }, h("b", { text: r.sim, style: "color:var(--ok)" }), h("span", { text: "Sim" })),
       h("div", { class: "stat" }, h("b", { text: r.nao, style: r.nao ? "color:var(--bad)" : "" }), h("span", { text: "Não" })),
-      h("div", { class: "stat" }, h("b", { text: r.vazio, style: r.vazio ? "color:var(--warn)" : "" }), h("span", { text: "Sem resposta" }))),
-    h("button", { class: "btn wa", onclick: () => enviarPdf(o) }, "Enviar checklist em PDF"));
-  const filtros = [["todos", "Todos"], ["vazio", "Sem resposta"], ["nao", "Não"], ...cats.map(c => ["cat:" + c, c])];
-  if (!filtros.some(f => f[0] === UI.filtroItens)) UI.filtroItens = "todos";
-  const chips = h("div", { class: "chips", role: "group", "aria-label": "Filtrar itens" }, filtros.map(([k, t]) =>
-    h("button", { class: "chip", "aria-pressed": String(UI.filtroItens === k), onclick: () => { UI.filtroItens = k; render(); } }, t)));
-  const lista = []; let n = 0; const numero = {};
+      h("div", { class: "stat" }, h("b", { text: r.vazio, style: r.vazio ? "color:var(--warn)" : "" }), h("span", { text: "Sem resposta" }))));
+  // abas: Todos, uma por categoria (Civil, Elétrica, Montagem, Testes, Start-up, Segurança…) e Enviar
+  const respCat = c => { const ci = its.filter(i => i.categoria === c); return [ci.filter(i => resposta(reg(o, i.codigo))).length, ci.length]; };
+  const abas = [["todos", "Todos"], ...cats.map(c => { const [a, t] = respCat(c); return ["cat:" + c, c + (a === t ? " ✓" : ` ${a}/${t}`)]; }), ["enviar", enviado(o) ? "Enviado ✓" : "Enviar"]];
+  if (!abas.some(f => f[0] === UI.filtroItens)) UI.filtroItens = "todos";
+  const chips = h("div", { class: "chips abas", role: "tablist", "aria-label": "Partes do checklist" }, abas.map(([k, t]) =>
+    h("button", { class: "chip" + (k === "enviar" ? " chip-enviar" : ""), role: "tab", "aria-selected": String(UI.filtroItens === k), "aria-pressed": String(UI.filtroItens === k),
+      onclick: () => { UI.filtroItens = k; render(); scrollTo(0, 0); } }, t)));
+  const numero = {}; let n = 0;
   for (const it of cats.flatMap(c => its.filter(i => i.categoria === c))) numero[it.codigo] = ++n;
+  if (UI.filtroItens === "enviar") { $("#main").replaceChildren(...[aviso, head, chips, telaEnviar(o, its, cats, r, numero)].filter(Boolean)); return; }
+  const lista = [];
   for (const c of cats) {
-    let ci = its.filter(i => i.categoria === c);
-    const tot = ci.length, resp = ci.filter(i => resposta(reg(o, i.codigo))).length;
-    ci = ci.filter(i => { const v = resposta(reg(o, i.codigo));
-      if (UI.filtroItens === "vazio") return !v; if (UI.filtroItens === "nao") return v === "nao";
-      if (UI.filtroItens.startsWith("cat:")) return i.categoria === UI.filtroItens.slice(4); return true; });
-    if (!ci.length) continue;
+    if (UI.filtroItens.startsWith("cat:") && UI.filtroItens.slice(4) !== c) continue;
+    const ci = its.filter(i => i.categoria === c), [resp, tot] = respCat(c);
     const grupo = h("div", { class: "card ck" },
       h("div", { class: "ck-cab" }, h("span", { class: "ck-cat" }, c, h("small", { text: ` ${resp}/${tot}` })), h("span", { text: "Sim" }), h("span", { text: "Não" })));
     for (const it of ci) grupo.append(linhaItem(o, it, numero[it.codigo]));
     lista.push(grupo);
   }
-  if (!lista.length) lista.push(h("p", { class: "vazio", text: UI.filtroItens === "vazio" ? "Todos os itens foram respondidos." : UI.filtroItens === "nao" ? "Nenhum item marcado como Não." : "Nenhum item neste filtro." }));
-  $("#main").replaceChildren(head, chips, ...lista); }
+  // no fim de cada parte, um atalho para a próxima (e para Enviar na última)
+  if (UI.filtroItens.startsWith("cat:")) { const i = cats.indexOf(UI.filtroItens.slice(4)), prox = cats[i + 1];
+    lista.push(h("button", { class: "btn sec", onclick: () => { UI.filtroItens = prox ? "cat:" + prox : "enviar"; render(); scrollTo(0, 0); } }, prox ? "Próxima parte: " + prox + " ›" : "Ir para Enviar ›")); }
+  else if (!enviado(o)) lista.push(h("button", { class: "btn", onclick: () => { UI.filtroItens = "enviar"; render(); scrollTo(0, 0); } }, "Terminei: ir para Enviar ›"));
+  $("#main").replaceChildren(...[aviso, head, chips, ...lista].filter(Boolean)); }
+
+/* aba Enviar: confere o que falta e envia o checklist ao supervisor */
+function telaEnviar(o, its, cats, r, numero) {
+  const vazios = its.filter(i => !resposta(reg(o, i.codigo))), naos = its.filter(i => resposta(reg(o, i.codigo)) === "nao");
+  const irPara = it => { UI.filtroItens = "cat:" + it.categoria; UI.abertos.add(o.id + "|" + it.codigo); render(); scrollTo(0, 0); };
+  const resumoCats = h("div", { class: "card ck" }, h("div", { class: "ck-cab", style: "grid-template-columns:1fr auto" }, h("span", { class: "ck-cat", text: "Parte" }), h("span", { text: "Respondidos" })),
+    cats.map(c => { const ci = its.filter(i => i.categoria === c), a = ci.filter(i => resposta(reg(o, i.codigo))).length;
+      return h("button", { class: "env-linha", onclick: () => { UI.filtroItens = "cat:" + c; render(); scrollTo(0, 0); } }, h("span", { text: c }),
+        h("span", { class: "pill " + (a === ci.length ? "p-ok" : "p-warn"), text: a === ci.length ? `✓ ${a}/${ci.length}` : `${a}/${ci.length}` })); }));
+  const lista = (titulo, arr, cls, extra) => arr.length ? h("div", { class: "card ck" }, h("div", { class: "ck-cab", style: "grid-template-columns:1fr" }, h("span", { class: "ck-cat", text: titulo })),
+    arr.map(it => h("button", { class: "env-linha", onclick: () => irPara(it) }, h("span", {}, h("b", { class: "ck-n", text: numero[it.codigo] + ". " }), it.item, extra ? h("div", { class: "meta", text: extra(it) }) : null),
+      h("span", { class: "pill " + cls, text: cls === "p-warn" ? "responder" : "Não" })))) : null;
+  const kids = [resumoCats,
+    lista(`Faltam ${vazios.length} item(ns) sem resposta`, vazios, "p-warn"),
+    lista(`${naos.length} item(ns) marcados como Não`, naos, "p-bad", it => reg(o, it.codigo).obs ? "Obs.: " + reg(o, it.codigo).obs : "Sem observação: toque para descrever o que falta")];
+  if (enviado(o)) {
+    kids.unshift(h("div", { class: "card env-ok" }, h("b", { text: o.analise === "Aprovado" ? "Checklist aprovado" : "Checklist enviado" }),
+      h("p", { class: "meta", style: "margin:0", text: `Enviado por ${o.enviadoPor || C.autor || "você"} em ${dataHora(o.enviadoCampo)}.` + (o.analise === "Aprovado" ? " Aprovado pelo supervisor em " + dataHora(o.analiseEm) + "." : " O supervisor vai analisar e, se precisar, devolve para correção.") }))); }
+  else {
+    const pendLocal = Object.values(P.itens).some(p => p.obra === o.id);
+    const msg = h("p", { class: "meta", style: "margin:0", text: vazios.length ? "Responda todos os itens para liberar o envio." : naos.filter(it => !reg(o, it.codigo).obs).length ? "Dica: descreva nas observações o que falta nos itens com Não antes de enviar." : "Tudo respondido. Confira e envie ao supervisor." });
+    const bt = h("button", { class: "btn", disabled: vazios.length || UI.enviando ? true : null }, UI.enviando ? "Enviando…" : "Enviar checklist ao supervisor");
+    bt.onclick = () => { if (!bt.classList.contains("arm")) { bt.classList.add("arm"); bt.textContent = "Toque de novo para confirmar o envio"; setTimeout(() => { if (bt.isConnected) { bt.classList.remove("arm"); bt.textContent = "Enviar checklist ao supervisor"; } }, 4000); return; }
+      enviarChecklist(o); };
+    kids.unshift(h("div", { class: "card", style: "display:flex;flex-direction:column;gap:10px" }, h("b", { text: "Enviar ao supervisor" }),
+      h("p", { class: "meta", style: "margin:0", text: `${r.sim + r.nao} de ${r.total} itens respondidos · ${r.sim} Sim · ${r.nao} Não.` + (CENTRAL.url ? " Depois de enviado, o checklist aparece como preenchido no painel do supervisor e fica só para leitura." : " Sem a central, o envio gera o Excel desta obra para você mandar ao supervisor.") }),
+      msg, bt, CENTRAL.url && pendLocal ? h("p", { class: "meta", style: "margin:0", text: "Há respostas ainda no celular: elas são sincronizadas antes do envio." }) : null)); }
+  kids.push(h("button", { class: "btn sec", onclick: () => enviarPdf(o) }, "Compartilhar PDF do checklist"));
+  return h("div", { style: "display:flex;flex-direction:column;gap:12px" }, ...kids.filter(Boolean)); }
+
+async function enviarChecklist(o) {
+  if (UI.enviando) return;
+  if (!CENTRAL.url) {   // sem central: marca como enviado no celular e gera o Excel da obra para o supervisor importar
+    LK[o.id] = { ...(LK[o.id] || {}), enviadoCampo: new Date().toISOString(), enviadoPor: C.autor || "", analise: "" }; salvarLK();
+    render(); exportarExcel([o.id]); toast("Checklist marcado como enviado. Mande o Excel ao supervisor."); return; }
+  if (!navigator.onLine) { toast("Sem internet. Conecte-se para enviar ao supervisor."); return; }
+  UI.enviando = true; render();
+  try {
+    await sincronizar();   // primeiro manda as respostas que ainda estão no celular
+    if (Object.values(P.itens).some(p => p.obra === o.id)) throw new Error("Ainda há respostas ou fotos no celular que não chegaram à central. Tente de novo.");
+    await api({ acao: "enviarChecklist", obra: o.id });
+    UI.enviando = false; await sincronizar();
+    toast("Checklist enviado ao supervisor");
+  } catch (e) { toast(e.codigo ? "Senha incorreta. Entre de novo." : (e.message && e.message !== "Failed to fetch" ? e.message : "Sem conexão com a central. Tente de novo.")); }
+  finally { UI.enviando = false; render(); } }
 
 function linhaItem(o, it, num) {
-  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), v = resposta(r), aberto = UI.abertos.has(key);
+  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), v = resposta(r), aberto = UI.abertos.has(key), so = enviado(o);
   const marcar = novo => { if (novo === v) return alterarItem(o.id, it.codigo, { status: "", concl: "" });   // tocar de novo limpa a resposta
     alterarItem(o.id, it.codigo, novo === "sim" ? { status: "Concluído", concl: r.concl || hoje() } : { status: "Pendente", concl: "" }); };
   const extras = [(r.fotos || []).length ? "📷 " + r.fotos.length : "", r.obs ? "✎ " + (r.obs.length > 34 ? r.obs.slice(0, 34) + "…" : r.obs) : ""].filter(Boolean).join("  ");
@@ -319,10 +384,10 @@ function linhaItem(o, it, num) {
     h("div", { class: "ck-txt" },
       h("span", { class: "ck-item" }, h("b", { class: "ck-n", text: num + ". " }), it.item),
       h("button", { class: "more ck-mais", "aria-expanded": String(aberto), onclick: () => { aberto ? UI.abertos.delete(key) : UI.abertos.add(key); render(); } },
-        extras || (aberto ? "Fechar" : "+ obs / foto"))),
-    h("button", { class: "ck-b ck-sim", "aria-pressed": String(v === "sim"), "aria-label": "Sim: " + it.item, onclick: () => marcar("sim") }, "Sim"),
-    h("button", { class: "ck-b ck-nao", "aria-pressed": String(v === "nao"), "aria-label": "Não: " + it.item, onclick: () => marcar("nao") }, "Não"));
-  if (aberto) linha.append(obsFoto(o, it, r));
+        extras || (aberto ? "Fechar" : so ? "" : "+ obs / foto"))),
+    h("button", { class: "ck-b ck-sim", disabled: so || null, "aria-pressed": String(v === "sim"), "aria-label": "Sim: " + it.item, onclick: () => marcar("sim") }, "Sim"),
+    h("button", { class: "ck-b ck-nao", disabled: so || null, "aria-pressed": String(v === "nao"), "aria-label": "Não: " + it.item, onclick: () => marcar("nao") }, "Não"));
+  if (aberto) linha.append(so ? h("div", { class: "conf-extra meta", text: r.obs || "Sem observação." }) : obsFoto(o, it, r));
   return linha; }
 
 function obsFoto(o, it, r) {
@@ -364,7 +429,7 @@ function telaConfig() {
   topo("Mais opções", C.autor || "", "");
   const kids = [
     h("div", { class: "card" }, h("b", { text: "Técnico" }), h("p", { class: "meta", style: "margin:4px 0 0", text: (C.autor || "") + " · você vê só as obras liberadas para você." })),
-    h("button", { class: "btn wa", onclick: () => exportarExcel() }, "Exportar minhas obras (Excel)"),
+    h("button", { class: "btn wa", onclick: () => exportarExcel(null) }, "Exportar minhas obras (Excel)"),
     h("p", { class: "meta", text: "O Excel sai com as abas OBRAS e REGISTRO, para o supervisor importar no painel." })];
   if (CENTRAL.url) kids.push(h("div", { class: "card" }, h("b", { text: "Central" }),
       h("p", { class: "meta", text: E.ultimaSync ? "Última sincronização: " + new Date(E.ultimaSync).toLocaleString("pt-BR") : "Ainda não sincronizou." }),
@@ -382,19 +447,19 @@ async function entregar(blob, nome, texto) {
   const a = h("a", { href: URL.createObjectURL(blob), download: nome }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
   toast("Arquivo baixado: " + nome); }
 
-function exportarExcel() {
+function exportarExcel(ids) {
   if (!window.XLSX) { toast("Aguarde o app terminar de carregar."); return; }
   const d = s => s ? new Date(s + "T12:00:00") : "";
-  const O = [["ID Obra", "Obra / Empreendimento", "Cliente", "Cidade/UF", "Modelo / Tipo de ETE", "Responsável ECTAS", "Técnico responsável", "Contato do cliente", "Telefone / E-mail", "Data da verificação", "Previsão de mobilização", "Data real de mobilização", "Situação da obra", "Observações gerais"]];
+  const O = [["ID Obra", "Obra / Empreendimento", "Cliente", "Cidade/UF", "Modelo / Tipo de ETE", "Responsável ECTAS", "Técnico responsável", "Contato do cliente", "Telefone / E-mail", "Data da verificação", "Previsão de mobilização", "Data real de mobilização", "Situação da obra", "Observações gerais", "Checklist enviado pelo técnico em"]];
   const R = [["ID Obra", "Código item", "Categoria", "Item de verificação", "Etapa limite", "Status", "Parte responsável", "Responsável (nome)", "Data prevista", "Data conclusão", "Evidência (link foto/doc)", "Observações / Pendências", "Última atualização", "Atualizado por"]];
-  for (const o of idsObras().sort().map(obraView)) {
-    O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.tecnico || C.autor, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs].map(x => x == null ? "" : x));
+  for (const o of (ids || idsObras()).slice().sort().map(obraView).filter(Boolean)) {
+    O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.tecnico || C.autor, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs, o.enviadoCampo ? new Date(o.enviadoCampo) : ""].map(x => x == null ? "" : x));
     for (const it of itensAtivos(o)) { const r = reg(o, it.codigo);
       R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, r.status || "", r.parte || "", r.resp || "", d(r.prev), d(r.concl),
         [r.link, (r.fotos || []).length ? r.fotos.length + " foto(s)" : ""].filter(Boolean).join(" | "), r.obs || "", r.em ? new Date(r.em) : "", r.por || ""]); } }
   const wb = XLSX.utils.book_new();
   const w1 = XLSX.utils.aoa_to_sheet(O, { cellDates: true, dateNF: "dd/mm/yyyy" }), w2 = XLSX.utils.aoa_to_sheet(R, { cellDates: true, dateNF: "dd/mm/yyyy" });
-  w1["!cols"] = [12, 32, 24, 16, 22, 20, 20, 20, 22, 13, 13, 13, 18, 40].map(w => ({ wch: w })); w2["!cols"] = [12, 10, 13, 52, 13, 14, 13, 20, 12, 12, 26, 42, 16, 18].map(w => ({ wch: w }));
+  w1["!cols"] = [12, 32, 24, 16, 22, 20, 20, 20, 22, 13, 13, 13, 18, 40, 18].map(w => ({ wch: w })); w2["!cols"] = [12, 10, 13, 52, 13, 14, 13, 20, 12, 12, 26, 42, 16, 18].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, w1, "OBRAS"); XLSX.utils.book_append_sheet(wb, w2, "REGISTRO");
   const buf = XLSX.write(wb, { type: "array", bookType: "xlsx", cellDates: true });
   entregar(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `Checklist_ECTAS_${hoje()}.xlsx`, "Checklist de pré-instalação ECTAS"); }

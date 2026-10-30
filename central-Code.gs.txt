@@ -30,7 +30,9 @@ const COL_OBRAS = [
   ["modelo", "Modelo / Tipo de ETE"], ["respEctas", "Responsável ECTAS"], ["tecnico", "Técnico responsável (campo)"],
   ["contato", "Contato do cliente"], ["telefone", "Telefone / E-mail"], ["dataVerificacao", "Data da verificação"],
   ["previsaoMob", "Previsão de mobilização"], ["dataRealMob", "Data real de mobilização"], ["situacao", "Situação da obra"],
-  ["obs", "Observações gerais"], ["em", "Atualizado em"], ["por", "Atualizado por"], ["liberadoCampo", "Autorizado ao campo em"]
+  ["obs", "Observações gerais"], ["em", "Atualizado em"], ["por", "Atualizado por"], ["liberadoCampo", "Autorizado ao campo em"],
+  ["enviadoCampo", "Checklist enviado pelo técnico em"], ["enviadoPor", "Enviado por"],
+  ["analise", "Análise do supervisor"], ["analiseEm", "Analisado em"], ["analiseObs", "Comentário da análise"]
 ];
 const COL_REG = [
   ["obra", "ID Obra"], ["cod", "Código item"], ["categoria", "Categoria"], ["item", "Item de verificação"],
@@ -43,7 +45,7 @@ const COL_ITENS = [["codigo", "Código"], ["categoria", "Categoria"], ["item", "
   ["etapa", "Etapa limite"], ["referencia", "Referência"], ["ativo", "Ativo (Sim/Não)"]];
 const COL_TEC = [["nome", "Nome do técnico"], ["codigo", "Código pessoal"], ["telefone", "Telefone (WhatsApp)"], ["ativo", "Ativo (Sim/Não)"]];
 const DATAS = ["dataVerificacao", "previsaoMob", "dataRealMob", "prev", "concl"];
-const CARIMBO = ["em", "liberadoCampo"];
+const CARIMBO = ["em", "liberadoCampo", "enviadoCampo", "analiseEm"];
 
 const ITENS_PADRAO = [
   ["CIV-01", "Civil", "Bases para os tanques (cotas de nível conforme Guia Civil)", "Mobilização", "Guia Civil"],
@@ -208,6 +210,7 @@ function doPost(e) {
   try {
     if (b.acao === "carregar") return json_(carregar_(tec.nome));
     if (b.acao === "salvarItens") return json_(salvarItens_(b.mudancas || [], tec.nome, minhas));
+    if (b.acao === "enviarChecklist") return json_(enviarChecklist_(b.obra, tec.nome, minhas));
     if (b.acao === "foto") {
       if (!minhas[idObra_(b.obra)]) return json_({ ok: false, erro: "Obra de outro técnico." });
       return json_(salvarFoto_(b));
@@ -289,6 +292,7 @@ function salvarItens_(mudancas, autor, minhas) {
   const plano = Object.keys(cat).filter(c => cat[c].ativo && norm_(cat[c].categoria) === "PLANEJAMENTO");
   const autorizadas = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id && o.liberadoCampo) autorizadas[o.id] = true; });
   const planejamentoOk = obra => !!autorizadas[obra];   // campo liberado só depois da autorização do supervisor
+  const enviadas = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id && o.enviadoCampo) enviadas[o.id] = true; });
   mudancas.forEach(m => {
     const obra = idObra_(m.obra), cod = String(m.cod || "").trim(); if (!obra || !cod) return;
     const k = obra + "|" + cod;
@@ -296,6 +300,7 @@ function salvarItens_(mudancas, autor, minhas) {
       if (!minhas[obra]) { recusadas.push(k); return; }          // obra de outro técnico
       if (plano.indexOf(cod) >= 0) { recusadas.push(k); return; } // planejamento é do supervisor
       if (!planejamentoOk(obra)) { recusadas.push(k); return; }   // campo ainda bloqueado
+      if (enviadas[obra]) { recusadas.push(k); return; }          // já enviado ao supervisor: só muda se ele devolver
     }
     const d = m.dados || {}, velho = porChave[k];
     // vale a alteração mais recente: se o servidor já tem uma mais nova, mantém a dele
@@ -314,6 +319,21 @@ function salvarItens_(mudancas, autor, minhas) {
     aceitas.push(k);
   });
   return { ok: true, aceitas: aceitas, ignoradas: ignoradas, recusadas: recusadas };
+}
+
+// O técnico envia o checklist preenchido: a obra aparece como "Preenchido" no painel do supervisor.
+function enviarChecklist_(obraId, tecnico, minhas) {
+  const id = idObra_(obraId);
+  if (!minhas[id]) return { ok: false, erro: "Obra de outro técnico." };
+  const sh = abaObras_(), o = ler_(sh, COL_OBRAS).filter(x => x.id === id)[0];
+  if (!o || !o.liberadoCampo) return { ok: false, erro: "A obra ainda não foi autorizada para o campo." };
+  if (o.enviadoCampo) return { ok: true, jaEnviado: true };
+  const resp = {}; ler_(abaReg_(), COL_REG).forEach(r => { if (r.obra === id && r.status) resp[r.cod] = true; });
+  const faltam = itens_().filter(i => i.ativo && norm_(i.categoria) !== "PLANEJAMENTO" && !resp[i.codigo]).map(i => i.codigo);
+  if (faltam.length) return { ok: false, erro: "Faltam " + faltam.length + " item(ns) sem resposta: " + faltam.join(", ") };
+  const n = Object.assign({}, o, { enviadoCampo: new Date().toISOString(), enviadoPor: tecnico, analise: "", analiseEm: "", analiseObs: o.analise === "Devolvido" ? o.analiseObs : "" });
+  sh.getRange(o._linha, 1, 1, COL_OBRAS.length).setValues([linha_(COL_OBRAS, n)]);
+  return { ok: true };
 }
 
 function pastaObra_(obra) {
