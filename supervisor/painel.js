@@ -8,7 +8,10 @@ const ler = (k, p) => { try { const v = JSON.parse(localStorage.getItem(k)); ret
 const gravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } };
 let D = ler("sup-dados", { obras: {}, itens: [], fonte: "", em: null });   // dados em uso
 let SENHA = ler("sup-senha", "");
-const UI = { aba: "obras", filtro: "ativas", busca: "", ano: new Date().getFullYear(), obra: null, carregando: false, erro: "" };
+const UI = { aba: "obras", filtro: "ativas", busca: "", ano: new Date().getFullYear(), obra: null, form: null, link: null, carregando: false, erro: "" };
+const SITUACOES = ["Em pré-instalação", "Mobilizada", "Instalação concluída", "Suspensa", "Cancelada"];
+const ROTULO = { "Concluído": "Conferido", "Pendente": "Não conferido", "Em andamento": "Não conferido", "Não aplicável": "Não se aplica" };
+const APP_CAMPO = "https://checklist-ectas.github.io/campo";
 
 const $ = s => document.querySelector(s);
 const h = (tag, a = {}, ...kids) => { const e = document.createElement(tag);
@@ -84,6 +87,7 @@ function topo() {
   $("#fonte").textContent = D.fonte === "central" ? "Dados da central · " + (D.em ? new Date(D.em).toLocaleString("pt-BR") : "")
     : D.fonte === "arquivos" ? "Dados dos arquivos importados" : "Checklist de Pré-Instalação";
   const ac = [];
+  if (!CENTRAL.url || SENHA) ac.push(h("button", { class: "acao", onclick: () => { UI.form = "nova"; UI.obra = null; render(); scrollTo(0, 0); } }, "+ Nova obra"));
   if (CENTRAL.url && SENHA) ac.push(h("button", { class: "acao", onclick: carregarCentral }, UI.carregando ? "Atualizando…" : "Atualizar"));
   if (D.fonte) ac.push(h("button", { class: "acao", onclick: exportar }, "Exportar Excel"));
   $("#acoes").replaceChildren(...ac); }
@@ -95,9 +99,11 @@ function render() {
   const kids = [];
   if (UI.erro) kids.push(h("div", { class: "notice warn", text: UI.erro }));
   if (!CENTRAL.url) kids.push(blocoImportar());
+  if (UI.form) { m.replaceChildren(...kids, telaForm(UI.form === "nova" ? null : D.obras[UI.form])); return; }
   if (!D.fonte || !Object.keys(D.obras).length) {
-    kids.push(h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra no painel ainda" }),
-      h("p", { text: CENTRAL.url ? "Assim que a equipe sincronizar, as obras aparecem aqui." : "Importe os arquivos Excel enviados pela equipe (botão Exportar do app de campo)." })));
+    kids.push(h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra cadastrada ainda" }),
+      h("p", { text: "Toque em “+ Nova obra” para cadastrar. Depois envie o link da obra para a equipe de campo conferir." }),
+      h("button", { class: "btn", style: "margin:10px auto 0", onclick: () => { UI.form = "nova"; render(); } }, "+ Nova obra")));
     m.replaceChildren(...kids); return; }
   if (UI.obra && D.obras[UI.obra]) { m.replaceChildren(...kids, telaObra(D.obras[UI.obra])); return; }
   kids.push(kpis());
@@ -155,7 +161,7 @@ function telaObras() {
         oninput: e => { UI.busca = e.target.value; const pos = e.target.selectionStart; render(); const b = $("#busca"); b.focus(); b.setSelectionRange(pos, pos); } }),
       h("div", { class: "chips" }, [["ativas", "Ativas"], ["naolib", "Não liberadas"], ["lib", "Liberadas"], ["mob", "Mobilizadas"], ["atras", "Com atraso"], ["todas", "Todas"]].map(([k, t]) =>
         h("button", { class: "chip", "aria-pressed": String(UI.filtro === k), onclick: () => { UI.filtro = k; render(); } }, t)))),
-    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Resp. ECTAS", "Mobilização", "Faltam", "Concluído", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: i >= 3 && i <= 7 ? "n" : "", text: t })))),
+    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Resp. ECTAS", "Mobilização", "Faltam", "Conferido", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: i >= 3 && i <= 7 ? "n" : "", text: t })))),
       h("tbody", {}, linhas))) : h("p", { class: "vazio", text: "Nenhuma obra neste filtro." })); }
 
 function telaObra(o) {
@@ -165,22 +171,27 @@ function telaObra(o) {
   const corpo = [];
   for (const c of cats) { corpo.push(h("tr", {}, h("td", { colspan: "7", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c })));
     for (const it of itensAtivos().filter(i => i.categoria === c)) { const g = reg(o, it.codigo), s = g.status || "Pendente", sp = situacaoPrazo(g);
-      const cls = { "Concluído": "p-ok", "Em andamento": "p-warn", "Pendente": "p-bad", "Não aplicável": "p-na" }[s];
+      const cls = { "Concluído": "p-ok", "Em andamento": "p-bad", "Pendente": "p-bad", "Não aplicável": "p-na" }[s];
       const fotos = (g.fotos || []).filter(f => String(f).startsWith("d:"));
       const thumbs = fotos.length && D.fonte === "central" ? h("div", { class: "thumbs" }, fotos.map(f => { const ph = h("div", { class: "ph", text: "foto" }); carregarFoto(f.slice(2), ph); return ph; })) : null;
       corpo.push(h("tr", {}, h("td", {}, h("span", { class: "code", text: it.codigo })), h("td", {}, it.item, h("div", { class: "meta", text: "Até " + it.etapa })),
-        h("td", {}, h("span", { class: "pill " + cls, text: s })), h("td", { text: [g.parte, g.resp].filter(Boolean).join(" · ") }),
+        h("td", {}, h("span", { class: "pill " + cls, text: ROTULO[s] || s })), h("td", { text: [g.parte, g.resp].filter(Boolean).join(" · ") }),
         h("td", { class: "n", text: g.prev ? fmt(g.prev) : "" }, h("div", { class: "meta", text: sp === "Atrasado" ? "Atrasado " + dias(hoje(), g.prev) + "d" : sp === "Concluído com atraso" ? "com atraso" : "" })),
         h("td", { class: "n", text: fmt(g.concl) }),
         h("td", {}, g.obs || "", g.link ? h("div", {}, h("a", { href: g.link, target: "_blank", rel: "noopener", text: "evidência" })) : null, thumbs,
           g.por ? h("div", { class: "meta", text: "por " + g.por + (g.em ? " em " + new Date(g.em).toLocaleDateString("pt-BR") : "") }) : null))); } }
   return h("div", { style: "display:flex;flex-direction:column;gap:14px" },
-    h("button", { class: "more", style: "align-self:flex-start", onclick: () => { UI.obra = null; render(); } }, "‹ Voltar para as obras"),
+    h("button", { class: "more", style: "align-self:flex-start", onclick: () => { UI.obra = null; UI.link = null; render(); } }, "‹ Voltar para as obras"),
+    blocoLink(o),
+    h("div", { class: "row" },
+      h("button", { class: "btn wa", onclick: () => compartilharLink(o) }, "Enviar link da obra para a equipe"),
+      h("button", { class: "btn sec", onclick: () => { UI.form = o.id; render(); scrollTo(0, 0); } }, "Editar dados da obra"),
+      o.dataRealMob ? null : h("button", { class: "btn sec", onclick: () => salvarObra({ id: o.id, dataRealMob: hoje(), situacao: "Mobilizada" }, "Mobilização registrada") }, "Registrar mobilização hoje")),
     h("div", { class: "card", style: "display:flex;flex-direction:column;gap:12px" },
       h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "pill " + r.lib.c, text: r.lib.t })),
       h("h2", { style: "margin:0;font-size:20px", text: o.nome || "" }),
       h("div", { class: "prog" }, h("i", { style: "width:" + pct(r.pct) })),
-      h("div", { class: "stats" }, [[pct(r.pct), "Concluído"], [r.conc + "/" + r.apl, "Itens"], [r.pendMob, "P/ mobilizar"], [r.atras, "Atrasados"]].map(([v, t]) => h("div", { class: "stat" }, h("b", { text: v }), h("span", { text: t })))),
+      h("div", { class: "stats" }, [[pct(r.pct), "Conferido"], [r.conc + "/" + r.apl, "Itens"], [r.pendMob, "P/ mobilizar"], [r.atras, "Atrasados"]].map(([v, t]) => h("div", { class: "stat" }, h("b", { text: v }), h("span", { text: t })))),
       h("dl", { class: "det" }, info.map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v }))))),
     h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Cód.", "Item", "Status", "Responsável", "Prazo", "Conclusão", "Observações / evidências"].map((t, i) => h("th", { class: i === 4 || i === 5 ? "n" : "", text: t })))), h("tbody", {}, corpo)))); }
 
@@ -190,6 +201,69 @@ async function carregarFoto(id, ph) {
     const src = await cacheFoto[id]; const img = h("img", { src, alt: "Foto" }); ph.replaceChildren(img);
     ph.onclick = () => { const lb = h("div", { class: "lightbox", onclick: () => lb.remove() }, h("img", { src, alt: "Foto" })); document.body.append(lb); };
   } catch (e) { ph.textContent = "indisponível"; } }
+
+
+/* ---------- cadastro de obras (supervisor) ---------- */
+function telaForm(o) {
+  const v = o || { situacao: "Em pré-instalação", dataVerificacao: hoje() };
+  const f = (k, lbl, type = "text", x = {}) => h("label", { class: "f" + (x.full ? " full" : "") }, lbl,
+    h("input", { id: "o-" + k, name: k, type, value: v[k] || "", required: x.req || null, placeholder: x.ph || "", readonly: x.ro || null }));
+  const msg = h("div", { class: "full meta" });
+  return h("div", { style: "display:flex;flex-direction:column;gap:12px;max-width:760px" },
+    h("button", { class: "more", style: "align-self:flex-start", onclick: () => { UI.form = null; render(); } }, "‹ Cancelar"),
+    h("h2", { style: "margin:0", text: o ? "Dados da obra " + o.id : "Nova obra" }),
+    h("form", { class: "card form", onsubmit: async e => { e.preventDefault();
+        const d = {}; for (const [k, val] of new FormData(e.target).entries()) d[k] = String(val).trim();
+        if (!o) { d.id = d.id.toUpperCase().replace(/\s+/g, "-"); if (!/^[A-Z0-9-]+$/.test(d.id)) { msg.textContent = "Use só letras, números e hífen no ID (ex.: OBRA-014)."; return; }
+          if (D.obras[d.id]) { msg.textContent = "Já existe uma obra com o ID " + d.id + "."; return; } }
+        else d.id = o.id;
+        msg.textContent = "Salvando…";
+        const ok = await salvarObra(d, o ? "Dados salvos" : "Obra cadastrada");
+        if (ok) { UI.form = null; UI.obra = d.id; UI.link = o ? null : d.id; render(); scrollTo(0, 0); } else msg.textContent = UI.erro || "Não foi possível salvar."; } },
+      f("id", "ID da obra", "text", { req: true, ph: "OBRA-014", ro: !!o }),
+      h("label", { class: "f" }, "Situação", h("select", { id: "o-situacao", name: "situacao" }, SITUACOES.map(s => h("option", { value: s, selected: s === v.situacao || null }, s)))),
+      f("nome", "Obra / empreendimento", "text", { req: true, full: true }), f("cliente", "Cliente"), f("cidade", "Cidade/UF", "text", { ph: "Joinville/SC" }),
+      f("modelo", "Modelo / tipo de ETE", "text", { full: true }), f("respEctas", "Responsável ECTAS"), f("contato", "Contato do cliente"),
+      f("telefone", "Telefone / e-mail", "text", { full: true }), f("dataVerificacao", "Data da verificação", "date"), f("previsaoMob", "Previsão de mobilização", "date"),
+      f("dataRealMob", "Data real de mobilização", "date"),
+      h("label", { class: "f full" }, "Observações gerais", h("textarea", { id: "o-obs", name: "obs" }, v.obs || "")),
+      h("div", { class: "full row" }, h("button", { class: "btn", type: "submit" }, o ? "Salvar alterações" : "Cadastrar obra")), msg)); }
+
+async function salvarObra(d, aviso) {
+  UI.erro = "";
+  if (CENTRAL.url) {
+    try { await api({ acao: "supSalvarObra", obra: d }); toast(aviso); await carregarCentral(); return true; }
+    catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : "Sem conexão com a central. A obra não foi salva."; render(); return false; } }
+  const atual = D.obras[d.id] || { id: d.id, checklist: {} };
+  D.obras[d.id] = { ...atual, ...d, checklist: atual.checklist || {} };
+  if (!D.fonte) D.fonte = "arquivos";
+  if (!D.itens || !D.itens.length) D.itens = ITENS_BASE();
+  gravar("sup-dados", D); toast(aviso); render(); return true; }
+
+// lista de itens usada antes de importar o primeiro Excel (a mesma do app de campo)
+function ITENS_BASE() { return (window.ITENS_CAMPO || []).map(r => ({ codigo: r[0], categoria: r[1], item: r[2], etapa: r[3], referencia: r[4], ativo: true })); }
+
+/* ---------- link da obra para a equipe ---------- */
+function linkObra(o) {
+  const campos = ["id", "nome", "cliente", "cidade", "modelo", "respEctas", "contato", "telefone", "dataVerificacao", "previsaoMob", "situacao", "obs"];
+  const dados = {}; for (const k of campos) if (o[k]) dados[k] = o[k];
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(dados)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return APP_CAMPO + "#o=" + b64; }
+async function compartilharLink(o) {
+  const url = linkObra(o), texto = `Checklist de pré-instalação: ${o.id} ${o.nome || ""}\nAbra o link para conferir os itens da obra:`;
+  try { if (navigator.share) { await navigator.share({ title: "Checklist " + o.id, text: texto, url }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+  UI.link = o.id; render();
+  try { await navigator.clipboard.writeText(texto + "\n" + url); toast("Link copiado. Cole no WhatsApp da equipe."); } catch (e) { } }
+function blocoLink(o) {
+  if (UI.link !== o.id) return null;
+  const url = linkObra(o);
+  const inp = h("input", { class: "busca", id: "link-obra", readonly: true, value: url, onfocus: e => e.target.select() });
+  return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px;border-color:var(--teal)" },
+    h("b", { text: "Link da obra para a equipe de campo" }),
+    h("p", { class: "meta", style: "margin:0", text: "Envie este link pelo WhatsApp. O técnico toca nele e a obra aparece no app, pronta para conferir." }),
+    inp, h("div", { class: "row" },
+      h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(url); toast("Link copiado"); } catch (e) { inp.focus(); inp.select(); toast("Selecione e copie o link"); } } }, "Copiar link"),
+      h("a", { class: "btn wa", href: "https://wa.me/?text=" + encodeURIComponent(`Checklist de pré-instalação: ${o.id} ${o.nome || ""}\n${url}`), target: "_blank", rel: "noopener" }, "Abrir no WhatsApp"))); }
 
 /* ---------- mês a mês ---------- */
 function calcMes(ano) {
@@ -213,11 +287,11 @@ function telaMes() {
     h("td", { class: "n", text: p(l.noPrazo, l.noPrazo + l.atraso), style: l.noPrazo + l.atraso && l.noPrazo / (l.noPrazo + l.atraso) < .8 ? "color:var(--bad);font-weight:700" : "" }),
     h("td", { class: "n", text: l.atrasados, style: l.atrasados ? "color:var(--bad);font-weight:700" : "" }));
   const mesAtual = UI.ano === new Date().getFullYear() ? new Date().getMonth() : -1;
-  const tabela = h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Mês", "Obras c/ mobilização prevista", "Obras mobilizadas", "Mobilizadas no prazo", "% mobil. no prazo", "Itens c/ prazo no mês", "Itens concluídos", "No prazo", "Com atraso", "% no prazo", "Atrasados em aberto"].map((t, i) => h("th", { class: i ? "n" : "", text: t, style: "white-space:normal;min-width:" + (i ? 78 : 90) + "px" })))),
+  const tabela = h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Mês", "Obras c/ mobilização prevista", "Obras mobilizadas", "Mobilizadas no prazo", "% mobil. no prazo", "Itens c/ prazo no mês", "Itens conferidos", "No prazo", "Com atraso", "% no prazo", "Atrasados em aberto"].map((t, i) => h("th", { class: i ? "n" : "", text: t, style: "white-space:normal;min-width:" + (i ? 78 : 90) + "px" })))),
     h("tbody", {}, linhas.map((l, i) => { const tr = row(MESES[i], l); if (i === mesAtual) tr.style.boxShadow = "inset 4px 0 0 var(--azul)"; return tr; }), row("TOTAL " + UI.ano, tot, "tot"))));
   return h("div", { style: "display:flex;flex-direction:column;gap:12px" },
     h("div", { class: "bar" }, h("b", { text: "Ano" }), h("select", { class: "ano", id: "ano", onchange: e => { UI.ano = +e.target.value; render(); } }, [...anos].sort().map(a => h("option", { value: a, selected: a === UI.ano || null }, a))),
-      h("span", { class: "grow" }), h("span", { class: "meta", text: "Concluídos contam pela data de conclusão; prazos pela data prevista; obras pela previsão e pela data real de mobilização." })),
+      h("span", { class: "grow" }), h("span", { class: "meta", text: "Conferidos contam pela data em que foram marcados; prazos pela data prevista; obras pela previsão e pela data real de mobilização." })),
     grafico(linhas), tabela); }
 function grafico(linhas) {
   const W = 720, H = 220, L = 34, B = 26, T = 12, max = Math.max(4, ...linhas.map(l => l.noPrazo + l.atraso + (l.conc - l.noPrazo - l.atraso)));
@@ -231,7 +305,7 @@ function grafico(linhas) {
     for (const [v, cor] of [[l.noPrazo, "#0073A8"], [l.atraso, "#E07B39"], [sem, "#66D3CD"]]) { if (!v) continue; el("rect", { x, y: y(base + v), width: w, height: y(base) - y(base + v), fill: cor, rx: 2 }); base += v; }
     if (l.conc) el("text", { x: x + w / 2, y: y(l.conc) - 4, "text-anchor": "middle", style: "font-weight:700" }, l.conc);
     el("text", { x: x + w / 2, y: H - 8, "text-anchor": "middle" }, MESES[i].slice(0, 3)); });
-  return h("div", { class: "card" }, h("b", { text: "Itens concluídos por mês" }),
+  return h("div", { class: "card" }, h("b", { text: "Itens conferidos por mês" }),
     h("div", { class: "legenda" }, h("span", {}, h("i", { style: "background:#0073A8" }), "No prazo"), h("span", {}, h("i", { style: "background:#E07B39" }), "Com atraso"), h("span", {}, h("i", { style: "background:#66D3CD" }), "Sem data prevista")), svg); }
 
 /* ---------- exportar consolidado ---------- */

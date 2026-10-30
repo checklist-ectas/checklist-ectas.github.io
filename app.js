@@ -15,6 +15,8 @@ const gravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } c
 let E = ler("ck-estado", { obras: {}, itens: null, ultimaSync: null, planilha: "" });   // última cópia da central
 let P = ler("ck-pend", { obras: {}, itens: {} });                                        // alterações ainda não enviadas
 let C = ler("ck-config", { codigo: "", autor: "" });
+let LK = ler("ck-obras-link", {});                                                      // obras recebidas por link do supervisor
+const salvarLK = () => gravar("ck-obras-link", LK);
 const salvarE = () => gravar("ck-estado", E), salvarP = () => gravar("ck-pend", P), salvarC = () => gravar("ck-config", C);
 const UI = { rota: { v: "lista" }, filtro: "ativas", busca: "", filtroItens: "todos", abertos: new Set(), sinc: false, sincMsg: "", sincErro: false, instalar: null };
 
@@ -62,12 +64,12 @@ function resumo(o) { let apl = 0, conc = 0, pendMob = 0, atras = 0;
 
 /* obra como o celular a vê: cópia da central + alterações locais ainda não enviadas */
 function obraView(id) {
-  const base = E.obras[id], loc = P.obras[id];
+  const base = E.obras[id] || LK[id], loc = P.obras[id];
   if (!base && !loc) return null;
   const o = { ...(base || {}), ...(loc || {}), id, checklist: { ...((base || {}).checklist || {}) } };
   for (const p of Object.values(P.itens)) if (p.obra === id) o.checklist[p.cod] = { ...(o.checklist[p.cod] || {}), ...p.dados };
   return o; }
-const idsObras = () => [...new Set([...Object.keys(E.obras), ...Object.keys(P.obras)])];
+const idsObras = () => [...new Set([...Object.keys(E.obras), ...Object.keys(LK), ...Object.keys(P.obras)])];
 const nPend = () => Object.keys(P.obras).length + Object.keys(P.itens).length;
 
 /* ---------- alterações ---------- */
@@ -94,10 +96,10 @@ function setSync(msg, erro) { UI.sincMsg = msg; UI.sincErro = !!erro; pintarSync
 function pintarSync() {
   const el = $("#sync"); if (!el) return; el.className = "sync wrap" + (UI.sincErro ? " erro" : "");
   const n = nPend();
-  el.replaceChildren(h("span", { text: UI.sincMsg + (n && !UI.sinc ? ` · ${n} alteração(ões) no celular` : "") }),
-    CENTRAL.url && !UI.sinc ? h("button", { onclick: () => sincronizar() }, "Sincronizar") : null); }
+  el.replaceChildren(...[h("span", { text: UI.sincMsg + (CENTRAL.url && n && !UI.sinc ? ` · ${n} alteração(ões) no celular` : "") }),
+    CENTRAL.url && !UI.sinc ? h("button", { onclick: () => sincronizar() }, "Sincronizar") : null].filter(Boolean)); }
 async function sincronizar() {
-  if (!CENTRAL.url) { setSync("Modo só neste celular: envie pelo WhatsApp ou Excel."); return; }
+  if (!CENTRAL.url) { setSync("Salvo neste celular. Envie o PDF ou o Excel ao supervisor."); return; }
   if (!C.codigo) return;
   if (UI.sinc) { deNovo = true; return; }
   if (!navigator.onLine) { setSync("Sem internet. As alterações ficam no celular.", true); return; }
@@ -138,8 +140,7 @@ setInterval(() => { if (nPend()) sincronizar(); }, 60000);
 /* ---------- navegação ---------- */
 function lerHash() { const x = decodeURIComponent(location.hash.slice(1));
   if (x.startsWith("obra-")) return { v: "obra", id: x.slice(5) };
-  if (x === "nova-obra") return { v: "form" };
-  if (x.startsWith("editar-")) return { v: "form", id: x.slice(7) };
+  if (x.startsWith("o=")) { const id = receberObraDoLink(x.slice(2)); history.replaceState(null, "", id ? "#obra-" + id : location.pathname); return id ? { v: "obra", id } : { v: "lista" }; }
   if (x === "config") return { v: "config" };
   return { v: "lista" }; }
 function ir(hash) { if ((location.hash || "#") === "#" + hash) { UI.rota = lerHash(); render(); } else location.hash = hash; scrollTo(0, 0); }
@@ -161,7 +162,6 @@ function render() {
   if (CENTRAL.url && !C.codigo) return telaEntrada();
   const r = UI.rota;
   if (r.v === "obra") return telaObra(r.id);
-  if (r.v === "form") return telaForm(r.id);
   if (r.v === "config") return telaConfig();
   return telaLista(); }
 document.addEventListener("focusout", () => setTimeout(() => { if (sujo) render(); }, 0));
@@ -194,125 +194,112 @@ function avisoInstalar() {
     h("button", { class: "more", onclick: () => { try { localStorage.setItem("ck-instalar-nao", Date.now() + 7 * 864e5); } catch (e) { } render(); } }, "Agora não")); }
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); UI.instalar = e; render(); });
 
+/* ---------- obras recebidas por link do supervisor ---------- */
+function decodificarObra(b64) {
+  const s = b64.replace(/-/g, "+").replace(/_/g, "/"); const pad = s + "===".slice((s.length + 3) % 4);
+  return JSON.parse(decodeURIComponent(escape(atob(pad)))); }
+function receberObraDoLink(cod) {
+  try { const o = decodificarObra(cod); const id = String(o.id || "").toUpperCase(); if (!/^[A-Z0-9-]+$/.test(id)) throw new Error("id");
+    LK[id] = { ...(LK[id] || {}), ...o, id }; salvarLK(); toast("Obra " + id + " recebida"); return id;
+  } catch (e) { toast("Link de obra inválido. Peça um novo link ao supervisor."); return null; } }
+
 function telaLista() {
-  topo("Checklist de Pré-Instalação", (C.autor ? C.autor + " · " : "") + "Obras", null, [h("button", { onclick: () => ir("config") }, "Mais")]);
+  topo("Checklist de Pré-Instalação", (C.autor ? C.autor + " · " : "") + "Minhas obras", null, [h("button", { onclick: () => ir("config") }, "Mais")]);
   const kids = [avisoInstalar(),
-    h("input", { class: "busca", id: "busca", type: "search", placeholder: "Buscar obra, cliente ou cidade", value: UI.busca, oninput: e => { UI.busca = e.target.value; desenharLista(); } }),
-    h("div", { class: "chips", role: "group", "aria-label": "Filtro" }, [["ativas", "Em andamento"], ["naolib", "Não liberadas"], ["lib", "Liberadas"], ["mob", "Mobilizadas"], ["todas", "Todas"]].map(([k, t]) =>
-      h("button", { class: "chip", "aria-pressed": String(UI.filtro === k), onclick: () => { UI.filtro = k; render(); } }, t))),
+    idsObras().length > 3 ? h("input", { class: "busca", id: "busca", type: "search", placeholder: "Buscar obra, cliente ou cidade", value: UI.busca, oninput: e => { UI.busca = e.target.value; desenharLista(); } }) : null,
     h("div", { id: "lista", style: "display:flex;flex-direction:column;gap:10px" })];
-  $("#main").replaceChildren(...kids.filter(Boolean)); desenharLista();
-  $("#fab").replaceChildren(h("button", { class: "btn fab", onclick: () => ir("nova-obra") }, "+ Nova obra")); }
+  $("#main").replaceChildren(...kids.filter(Boolean)); desenharLista(); }
 function desenharLista() {
   const box = $("#lista"); if (!box) return;
   const q = UI.busca.trim().toLowerCase();
-  const todas = idsObras().map(obraView).filter(Boolean);
-  if (!todas.length) { box.replaceChildren(h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra ainda" }),
-    h("p", { text: CENTRAL.url && !E.ultimaSync ? "Conecte-se à internet para baixar as obras da central, ou toque em “+ Nova obra”." : "Toque em “+ Nova obra” para cadastrar a primeira. Os itens do checklist aparecem automaticamente." }))); return; }
-  const lista = todas.map(o => ({ o, r: resumo(o) })).filter(({ o, r }) => { const enc = ["Instalação concluída", "Cancelada"].includes(o.situacao);
-      if (UI.filtro === "ativas") return !enc && r.lib.t !== "MOBILIZADA";
-      if (UI.filtro === "naolib") return !enc && r.lib.t === "NÃO LIBERADA";
-      if (UI.filtro === "lib") return !enc && r.lib.t === "LIBERADA";
-      if (UI.filtro === "mob") return r.lib.t === "MOBILIZADA"; return true; })
-    .filter(({ o }) => !q || [o.id, o.nome, o.cliente, o.cidade].join(" ").toLowerCase().includes(q))
-    .sort((a, b) => (a.o.previsaoMob || "9999").localeCompare(b.o.previsaoMob || "9999"));
-  if (!lista.length) { box.replaceChildren(h("p", { class: "vazio", text: "Nenhuma obra neste filtro." })); return; }
-  box.replaceChildren(...lista.map(({ o, r }) => { const falta = o.previsaoMob && !o.dataRealMob ? dias(o.previsaoMob, hoje()) : null;
+  const todas = idsObras().map(obraView).filter(o => o && !["Instalação concluída", "Cancelada"].includes(o.situacao));
+  if (!todas.length) { box.replaceChildren(h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra para conferir" }),
+    h("p", { text: CENTRAL.url ? (E.ultimaSync ? "As obras são cadastradas pelo supervisor e aparecem aqui sozinhas." : "Conecte-se à internet para receber as obras cadastradas pelo supervisor.")
+      : "As obras são cadastradas pelo supervisor. Toque no link da obra que ele enviar pelo WhatsApp e ela aparece aqui." }))); return; }
+  const lista = todas.filter(o => !q || [o.id, o.nome, o.cliente, o.cidade].join(" ").toLowerCase().includes(q))
+    .sort((a, b) => (a.previsaoMob || "9999").localeCompare(b.previsaoMob || "9999"));
+  box.replaceChildren(...lista.map(o => { const r = resumoCampo(o);
     return h("button", { class: "card obra", onclick: () => ir("obra-" + o.id) },
-      h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "grow" }), h("span", { class: "pill " + r.lib.c, text: r.lib.t })),
+      h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "grow" }),
+        h("span", { class: "pill " + (r.nao ? "p-bad" : "p-ok"), text: r.nao ? r.nao + " não conferido(s)" : "Tudo conferido" })),
       h("h3", { text: o.nome || "(sem nome)" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") }),
       h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
-      h("div", { class: "row meta" }, h("span", { text: `${r.conc}/${r.apl} concluídos (${Math.round(r.pct * 100)}%)` }),
-        r.pendMob ? h("span", { class: "pill p-bad", text: `${r.pendMob} p/ mobilização` }) : null,
-        r.atras ? h("span", { class: "pill p-warn", text: `${r.atras} atrasado(s)` }) : null, h("span", { class: "grow" }),
-        o.dataRealMob ? h("span", { text: "Mobilizada " + fmt(o.dataRealMob) }) : o.previsaoMob ? h("span", { text: `Mobilização ${fmt(o.previsaoMob)}${falta != null ? (falta >= 0 ? ` (em ${falta}d)` : ` (${-falta}d atrás)`) : ""}` }) : null)); })); }
+      h("div", { class: "row meta" }, h("span", { text: `${r.conf} de ${r.total} conferidos` }), h("span", { class: "grow" }),
+        o.previsaoMob ? h("span", { text: "Mobilização " + fmt(o.previsaoMob) }) : null)); })); }
+
+/* Conferido = Concluído · Não conferido = Pendente (mesmos status da planilha) */
+function resumoCampo(o) { let conf = 0, total = 0, mob = 0;
+  for (const it of itensAtivos()) { const s = stOf(o, it.codigo); if (s === "Não aplicável") continue; total++;
+    if (s === "Concluído") conf++; else if (it.etapa === "Mobilização") mob++; }
+  return { conf, total, nao: total - conf, mob, pct: total ? conf / total : 0 }; }
 
 function telaObra(id) {
   const o = obraView(id);
-  if (!o) { topo("Obra", "", ""); $("#main").replaceChildren(h("div", { class: "vazio" }, h("h2", { text: "Obra não encontrada" }))); return; }
-  const r = resumo(o);
-  topo(o.nome || o.id, o.id, "", [h("button", { onclick: () => ir("editar-" + o.id) }, "Dados")]);
+  if (!o) { topo("Obra", "", ""); $("#main").replaceChildren(h("div", { class: "vazio" }, h("h2", { text: "Obra não encontrada" }), h("p", { text: "Peça ao supervisor o link desta obra." }))); return; }
+  const r = resumoCampo(o);
+  topo(o.nome || o.id, o.id, "");
   const its = itensAtivos(), cats = [...new Set(its.map(i => i.categoria))];
-  const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:12px" },
-    h("div", { class: "row" }, h("span", { class: "pill " + r.lib.c, text: r.lib.t }), h("span", { class: "grow" }),
-      h("span", { class: "meta", text: o.dataRealMob ? "Mobilizada em " + fmt(o.dataRealMob) : o.previsaoMob ? "Mobilização prevista " + fmt(o.previsaoMob) : "Sem previsão de mobilização" })),
+  const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
     h("div", { class: "meta", text: [o.cliente, o.cidade, o.modelo].filter(Boolean).join(" · ") }),
+    o.previsaoMob || o.respEctas ? h("div", { class: "meta", text: [o.previsaoMob ? "Mobilização prevista " + fmt(o.previsaoMob) : "", o.respEctas ? "Responsável ECTAS: " + o.respEctas : ""].filter(Boolean).join(" · ") }) : null,
     h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
-    h("div", { class: "stats" },
-      h("div", { class: "stat" }, h("b", { text: Math.round(r.pct * 100) + "%" }), h("span", { text: "Concluído" })),
-      h("div", { class: "stat" }, h("b", { text: r.conc + "/" + r.apl }), h("span", { text: "Itens" })),
-      h("div", { class: "stat" }, h("b", { text: r.pendMob, style: r.pendMob ? "color:var(--bad)" : "" }), h("span", { text: "P/ mobilizar" })),
-      h("div", { class: "stat" }, h("b", { text: r.atras, style: r.atras ? "color:var(--warn)" : "" }), h("span", { text: "Atrasados" }))),
-    h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:8px" },
-      h("button", { class: "btn wa", onclick: () => enviarPdf(o) }, "Enviar PDF"),
-      o.dataRealMob ? h("button", { class: "btn sec", onclick: () => ir("editar-" + o.id) }, "Editar dados") :
-        h("button", { class: "btn sec", onclick: () => { alterarObra(o.id, { dataRealMob: hoje(), situacao: "Mobilizada" }); toast("Mobilização registrada"); render(); } }, "Mobilizou hoje")));
-  const filtros = [["todos", "Todos"], ["abertos", "Em aberto"], ["mob", "Mobilização"], ...cats.map(c => ["cat:" + c, c])];
+    h("div", { class: "stats", style: "grid-template-columns:repeat(3,1fr)" },
+      h("div", { class: "stat" }, h("b", { text: r.conf, style: "color:var(--ok)" }), h("span", { text: "Conferidos" })),
+      h("div", { class: "stat" }, h("b", { text: r.nao, style: r.nao ? "color:var(--bad)" : "" }), h("span", { text: "Não conferidos" })),
+      h("div", { class: "stat" }, h("b", { text: r.mob, style: r.mob ? "color:var(--bad)" : "" }), h("span", { text: "Faltam p/ mobilizar" }))),
+    h("button", { class: "btn wa", onclick: () => enviarPdf(o) }, "Enviar checklist em PDF"));
+  const filtros = [["todos", "Todos"], ["abertos", "Não conferidos"], ...cats.map(c => ["cat:" + c, c])];
   if (!filtros.some(f => f[0] === UI.filtroItens)) UI.filtroItens = "todos";
   const chips = h("div", { class: "chips", role: "group", "aria-label": "Filtrar itens" }, filtros.map(([k, t]) =>
     h("button", { class: "chip", "aria-pressed": String(UI.filtroItens === k), onclick: () => { UI.filtroItens = k; render(); } }, t)));
   const lista = [];
   for (const c of cats) {
-    let ci = its.filter(i => i.categoria === c);
-    const tot = ci.filter(i => stOf(o, i.codigo) !== "Não aplicável").length, ok = ci.filter(i => stOf(o, i.codigo) === "Concluído").length;
-    ci = ci.filter(i => { const s = stOf(o, i.codigo);
-      if (UI.filtroItens === "abertos") return s !== "Concluído" && s !== "Não aplicável";
-      if (UI.filtroItens === "mob") return i.etapa === "Mobilização";
+    let ci = its.filter(i => i.categoria === c && stOf(o, i.codigo) !== "Não aplicável");
+    const tot = ci.length, ok = ci.filter(i => stOf(o, i.codigo) === "Concluído").length;
+    ci = ci.filter(i => { if (UI.filtroItens === "abertos") return stOf(o, i.codigo) !== "Concluído";
       if (UI.filtroItens.startsWith("cat:")) return i.categoria === UI.filtroItens.slice(4); return true; });
     if (!ci.length) continue;
-    lista.push(h("div", { class: "cat" }, c, h("span", { text: `${ok}/${tot}` })));
-    for (const it of ci) lista.push(cartao(o, it));
+    const grupo = h("div", { class: "card lista-conf" }, h("div", { class: "cat", style: "margin:0 0 4px" }, c, h("span", { text: `${ok}/${tot}` })));
+    for (const it of ci) grupo.append(linhaItem(o, it));
+    lista.push(grupo);
   }
-  if (!lista.length) lista.push(h("p", { class: "vazio", text: "Nenhum item neste filtro." }));
+  if (!lista.length) lista.push(h("p", { class: "vazio", text: UI.filtroItens === "abertos" ? "Todos os itens foram conferidos." : "Nenhum item neste filtro." }));
   $("#main").replaceChildren(head, chips, ...lista); }
 
-function cartao(o, it) {
-  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), s = r.status || "Pendente", pz = prazo(r), aberto = UI.abertos.has(key);
-  const salvar = patch => alterarItem(o.id, it.codigo, patch);
-  const info = [r.parte, r.resp, r.concl ? "Concluído " + fmt(r.concl) : "", (r.fotos || []).length ? r.fotos.length + " foto(s)" : "",
-    r.obs ? "“" + (r.obs.length > 60 ? r.obs.slice(0, 60) + "…" : r.obs) + "”" : "", r.por ? "por " + r.por : ""].filter(Boolean).join(" · ");
-  const card = h("article", { class: "card item", "data-s": s },
-    h("div", { class: "row" }, h("span", { class: "code", text: it.codigo }),
-      h("span", { class: "pill " + (it.etapa === "Mobilização" ? "p-mob" : "p-na"), text: "Até " + it.etapa }), h("span", { class: "grow" }),
-      pz ? h("span", { class: "pill " + pz.c, text: pz.t }) : null),
-    h("div", { class: "txt", text: it.item }),
-    h("div", { class: "seg", role: "group", "aria-label": "Status de " + it.codigo }, STATUS.map(v =>
-      h("button", { "data-v": v, "aria-pressed": String(s === v), onclick: () => { if (v === s) return; const p = { status: v };
-        if (v === "Concluído" && !r.concl) p.concl = hoje(); if (s === "Concluído" && v !== "Concluído") p.concl = ""; salvar(p); } }, ROTULO[v]))),
-    info ? h("div", { class: "meta", text: info }) : null,
-    h("button", { class: "more", "aria-expanded": String(aberto), onclick: () => { aberto ? UI.abertos.delete(key) : UI.abertos.add(key); render(); } },
-      aberto ? "Fechar detalhes" : "Detalhes, fotos e observações"));
-  if (aberto) card.append(detalhes(o, it, r, salvar));
-  return card; }
+function linhaItem(o, it) {
+  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), conf = (r.status || "Pendente") === "Concluído", aberto = UI.abertos.has(key);
+  const marcar = v => { if (v === conf && (r.status || "") !== "") return;
+    alterarItem(o.id, it.codigo, v ? { status: "Concluído", concl: r.concl || hoje() } : { status: "Pendente", concl: "" }); };
+  const extras = [(r.fotos || []).length ? "📷 " + r.fotos.length : "", r.obs ? "✎ " + (r.obs.length > 40 ? r.obs.slice(0, 40) + "…" : r.obs) : ""].filter(Boolean).join("  ");
+  const linha = h("div", { class: "conf-linha", "data-c": conf ? "1" : (r.status ? "0" : "") },
+    h("div", { class: "conf-txt" }, h("span", { class: "conf-item", text: it.item }),
+      h("button", { class: "more conf-mais", "aria-expanded": String(aberto), onclick: () => { aberto ? UI.abertos.delete(key) : UI.abertos.add(key); render(); } },
+        extras || (aberto ? "Fechar" : "+ observação / foto"))),
+    h("div", { class: "conf-bts", role: "group", "aria-label": it.item },
+      h("button", { class: "conf-sim", "aria-pressed": String(conf), onclick: () => marcar(true) }, "✓ Conferido"),
+      h("button", { class: "conf-nao", "aria-pressed": String(!conf && !!r.status), onclick: () => marcar(false) }, "✗ Não conferido")));
+  if (aberto) linha.append(obsFoto(o, it, r));
+  return linha; }
 
-function detalhes(o, it, r, salvar) {
+function obsFoto(o, it, r) {
   const base = (o.id + "-" + it.codigo).replace(/[^A-Za-z0-9-]/g, "");
-  const campo = (lbl, el, cls) => h("label", { class: "f" + (cls ? " " + cls : "") }, lbl, el);
+  const salvar = patch => alterarItem(o.id, it.codigo, patch);
   const fotos = h("div", { class: "fotos" });
   for (const ref of (r.fotos || [])) {
-    const ph = h("div", { class: "ph", text: "carregando…" });
-    mostrarFoto(ref, ph);
+    const ph = h("div", { class: "ph", text: "carregando…" }); mostrarFoto(ref, ph);
     const x = h("button", { class: "x", type: "button", "aria-label": "Remover foto" }, "✕");
     x.onclick = ev => { ev.stopPropagation(); if (!x.classList.contains("arm")) { x.classList.add("arm"); x.textContent = "Remover?"; setTimeout(() => { x.classList.remove("arm"); x.textContent = "✕"; }, 3000); return; }
       salvar({ fotos: (r.fotos || []).filter(f => f !== ref) }); if (ref.startsWith("l:")) fDel(ref); };
-    ph.append(x); if (ref.startsWith("l:")) ph.append(h("span", { class: "pend", text: "a enviar" }));
-    fotos.append(ph); }
+    ph.append(x); if (ref.startsWith("l:")) ph.append(h("span", { class: "pend", text: "a enviar" })); fotos.append(ph); }
   const fi = h("input", { type: "file", accept: "image/*", id: "f-" + base, hidden: true, onchange: async e => {
-    const arqs = [...e.target.files]; e.target.value = ""; if (!arqs.length) return;
-    const novas = [];
+    const arqs = [...e.target.files]; e.target.value = ""; const novas = [];
     for (const f of arqs) { try { const dataUrl = await reduzir(f); const k = "l:" + uid(); await fPut(k, { dataUrl, obra: o.id, cod: it.codigo, pendente: true }); novas.push(k); } catch (err) { toast("Não foi possível ler a foto."); } }
-    if (novas.length) { const atual = reg(obraView(o.id), it.codigo); salvar({ fotos: [...(atual.fotos || []), ...novas] }); toast(novas.length > 1 ? novas.length + " fotos adicionadas" : "Foto adicionada"); } } });
+    if (novas.length) { const atual = reg(obraView(o.id), it.codigo); salvar({ fotos: [...(atual.fotos || []), ...novas] }); toast("Foto adicionada"); } } });
   fi.multiple = true;
-  fotos.append(h("label", { class: "addph", for: "f-" + base }, h("b", { text: "+" }), "Tirar ou anexar foto"), fi);
-  return h("div", { class: "form" },
-    campo("Parte responsável", h("select", { id: "pa-" + base, onchange: e => salvar({ parte: e.target.value }) }, h("option", { value: "" }, "—"), PARTES.map(x => h("option", { value: x, selected: x === r.parte || null }, x)))),
-    campo("Responsável (nome)", h("input", { id: "rs-" + base, value: r.resp || "", placeholder: "Quem resolve", onchange: e => salvar({ resp: e.target.value }) })),
-    campo("Data prevista", h("input", { id: "dp-" + base, type: "date", value: r.prev || "", onchange: e => salvar({ prev: e.target.value }) })),
-    campo("Data de conclusão", h("input", { id: "dc-" + base, type: "date", value: r.concl || "", onchange: e => salvar({ concl: e.target.value }) })),
-    campo("Observações / pendências", h("textarea", { id: "ob-" + base, onchange: e => salvar({ obs: e.target.value }) }, r.obs || ""), "full"),
-    campo("Link de evidência (opcional)", h("input", { id: "ev-" + base, type: "url", value: r.link || "", placeholder: "https://…", onchange: e => salvar({ link: e.target.value }) }), "full"),
-    h("div", { class: "full", style: "display:flex;flex-direction:column;gap:6px" }, h("span", { class: "meta", style: "font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:11.5px", text: "Fotos" }), fotos),
-    it.referencia ? h("div", { class: "meta full", text: "Referência: " + it.referencia }) : null); }
+  fotos.append(h("label", { class: "addph", for: "f-" + base }, h("b", { text: "+" }), "Foto"), fi);
+  return h("div", { class: "conf-extra" },
+    h("label", { class: "f" }, "Observação", h("textarea", { id: "ob-" + base, placeholder: "O que falta, quem resolve, previsão…", onchange: e => salvar({ obs: e.target.value }) }, r.obs || "")),
+    fotos); }
 
 async function reduzir(file) {
   const bmp = await createImageBitmap(file); const max = 1600, k = Math.min(1, max / Math.max(bmp.width, bmp.height));
@@ -328,30 +315,6 @@ async function mostrarFoto(ref, ph) {
   if (!d) { if (alvo) alvo.textContent = "Foto na central (sem internet)"; return; }
   const img = h("img", { src: d, alt: "Foto de evidência" }); if (alvo) alvo.replaceWith(img); else ph.prepend(img);
   ph.onclick = () => { const lb = h("div", { class: "lightbox", onclick: () => lb.remove() }, h("img", { src: d, alt: "Foto" })); document.body.append(lb); }; }
-
-function telaForm(id) {
-  const o = id ? obraView(id) : null;
-  topo(o ? "Dados da obra" : "Nova obra", o ? o.id : "Cadastro", o ? "obra-" + o.id : "");
-  if (id && !o) { $("#main").replaceChildren(h("p", { class: "vazio", text: "Obra não encontrada." })); return; }
-  const v = o || { situacao: "Em pré-instalação", dataVerificacao: hoje(), respEctas: C.autor };
-  const f = (k, lbl, type = "text", x = {}) => h("label", { class: "f" + (x.full ? " full" : "") }, lbl,
-    h("input", { id: "o-" + k, name: k, type, value: v[k] || "", required: x.req || null, placeholder: x.ph || "", readonly: x.ro || null, autocapitalize: x.caps || null }));
-  const msg = h("div", { class: "full meta" });
-  const form = h("form", { class: "card form", onsubmit: e => { e.preventDefault();
-      const d = {}; for (const [k, val] of new FormData(e.target).entries()) d[k] = String(val).trim();
-      if (!o) { d.id = d.id.toUpperCase().replace(/\s+/g, "-"); if (!/^[A-Z0-9-]+$/.test(d.id)) { msg.textContent = "Use só letras, números e hífen no ID (ex.: OBRA-014)."; return; }
-        if (obraView(d.id)) { msg.textContent = "Já existe uma obra com o ID " + d.id + "."; return; } }
-      const oid = o ? o.id : d.id; delete d.id; alterarObra(oid, d); toast(o ? "Dados salvos" : "Obra cadastrada"); ir("obra-" + oid); } },
-    f("id", "ID da obra", "text", { req: true, ph: "OBRA-014", ro: !!o, caps: "characters" }),
-    h("label", { class: "f" }, "Situação", h("select", { id: "o-situacao", name: "situacao" }, SITUACOES.map(s => h("option", { value: s, selected: s === v.situacao || null }, s)))),
-    f("nome", "Obra / empreendimento", "text", { req: true, full: true }), f("cliente", "Cliente"), f("cidade", "Cidade/UF", "text", { ph: "Joinville/SC" }),
-    f("modelo", "Modelo / tipo de ETE", "text", { full: true }), f("respEctas", "Responsável ECTAS"), f("contato", "Contato do cliente"),
-    f("telefone", "Telefone / e-mail", "text", { full: true }), f("dataVerificacao", "Data da verificação", "date"), f("previsaoMob", "Previsão de mobilização", "date"),
-    f("dataRealMob", "Data real de mobilização", "date"),
-    h("label", { class: "f full" }, "Observações gerais", h("textarea", { id: "o-obs", name: "obs" }, v.obs || "")),
-    h("div", { class: "full row" }, h("button", { class: "btn grow", type: "submit" }, o ? "Salvar alterações" : "Cadastrar obra"),
-      h("button", { class: "btn sec", type: "button", onclick: () => ir(o ? "obra-" + o.id : "") }, "Cancelar")), msg);
-  $("#main").replaceChildren(form); }
 
 function telaConfig() {
   topo("Mais opções", C.autor || "", "");
@@ -408,7 +371,7 @@ async function enviarPdf(o) {
   cab();
   doc.setFontSize(9); doc.setTextColor(29, 29, 27);
   const linhasInfo = [["Obra", o.nome], ["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
-    ["Previsão de mobilização", fmt(o.previsaoMob)], ["Situação", r.lib.t + " · " + r.conc + "/" + r.apl + " itens concluídos (" + Math.round(r.pct * 100) + "%) · " + r.pendMob + " pendência(s) para mobilização"]];
+    ["Previsão de mobilização", fmt(o.previsaoMob)], ["Conferência", r.conc + " de " + r.apl + " itens conferidos (" + Math.round(r.pct * 100) + "%) · " + (r.apl - r.conc) + " não conferido(s) · " + r.pendMob + " deles necessário(s) para mobilizar"]];
   for (const [k, v] of linhasInfo) { if (!v) continue; doc.setFont("helvetica", "bold"); doc.text(k + ":", M, y); doc.setFont("helvetica", "normal");
     const t = doc.splitTextToSize(String(v), W - 2 * M - 42); doc.text(t, M + 42, y); y += 4.6 * t.length; }
   y += 3;
@@ -416,12 +379,12 @@ async function enviarPdf(o) {
   const cabTab = () => { doc.setFillColor(...NAVY); doc.rect(M, y - 4, W - 2 * M, 6, "F"); doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
     for (const c of cols) doc.text(c[2], c[0] + 1, y); y += 4; doc.setTextColor(29, 29, 27); doc.setFont("helvetica", "normal"); };
   cabTab();
-  const cor = { "Concluído": [30, 123, 74], "Em andamento": [138, 90, 0], "Pendente": [163, 18, 42], "Não aplicável": [96, 96, 96] };
+  const cor = { "Concluído": [30, 123, 74], "Em andamento": [163, 18, 42], "Pendente": [163, 18, 42], "Não aplicável": [96, 96, 96] };
   let catAtual = "";
   const ordem = [...new Set(itensAtivos().map(i => i.categoria))];
   for (const it of ordem.flatMap(c => itensAtivos().filter(i => i.categoria === c))) {
     const g = reg(o, it.codigo), s = g.status || "Pendente";
-    const cel = [it.codigo, it.item, s, [g.parte, g.resp].filter(Boolean).join(" - "), g.concl ? "Ok " + fmt(g.concl).slice(0, 5) : g.prev ? fmt(g.prev) : "", g.obs || ""];
+    const cel = [it.codigo, it.item, s === "Concluído" ? "Conferido" : s === "Não aplicável" ? "Não se aplica" : "Não conferido", [g.parte, g.resp].filter(Boolean).join(" - "), g.concl ? "Ok " + fmt(g.concl).slice(0, 5) : g.prev ? fmt(g.prev) : "", g.obs || ""];
     const quebras = cel.map((t, i) => doc.splitTextToSize(String(t), cols[i][1] - 2));
     const alt = Math.max(...quebras.map(q => q.length)) * 3.4 + 2.2;
     if (it.categoria !== catAtual) { if (y + 6 + alt > 285) { doc.addPage(); cab(); cabTab(); }
@@ -433,11 +396,11 @@ async function enviarPdf(o) {
   for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7); doc.setTextColor(...CINZA);
     doc.text("Gerado em " + new Date().toLocaleString("pt-BR") + (C.autor ? " por " + C.autor : "") + " · ECTAS Saneamento", M, 292); doc.text(i + "/" + n, W - M, 292, { align: "right" }); }
   const pend = itensAtivos().filter(it => !["Concluído", "Não aplicável"].includes(stOf(o, it.codigo)));
-  const texto = `Checklist de pré-instalação - ${o.id} ${o.nome || ""}\nSituação: ${r.lib.t} · ${Math.round(r.pct * 100)}% concluído · ${pend.length} item(ns) em aberto` +
-    (r.pendMob ? `\nPendências para mobilização: ${itensAtivos().filter(it => it.etapa === "Mobilização" && pend.includes(it)).map(it => it.codigo).join(", ")}` : "");
+  const texto = `Checklist de pré-instalação - ${o.id} ${o.nome || ""}\n${r.conc} de ${r.apl} itens conferidos · ${pend.length} não conferido(s)` +
+    (r.pendMob ? `\nNão conferidos necessários para mobilizar: ${itensAtivos().filter(it => it.etapa === "Mobilização" && pend.includes(it)).map(it => it.codigo).join(", ")}` : "");
   entregar(doc.output("blob"), `Checklist ${o.id} ${hoje()}.pdf`, texto); }
 
 /* ---------- início ---------- */
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => { });
 UI.rota = lerHash(); render();
-if (!CENTRAL.url) setSync("Modo só neste celular: envie pelo WhatsApp ou Excel."); else sincronizar();
+if (!CENTRAL.url) setSync("Salvo neste celular. Envie o PDF ou o Excel ao supervisor."); else sincronizar();

@@ -109,3 +109,16 @@ textarea{resize:vertical;min-height:70px}
 .instalar img{width:44px;height:44px;border-radius:10px}
 .ent{max-width:420px;margin:24px auto 0;display:flex;flex-direction:column;gap:12px}
 .ent h2{margin:0;font-size:20px}
+/* lista de conferência da equipe de campo */
+.lista-conf{display:flex;flex-direction:column;gap:0;padding:12px 14px}
+.conf-linha{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-top:1px solid var(--line)}
+.lista-conf .cat + .conf-linha{border-top:none}
+.conf-txt{display:flex;flex-direction:column;gap:2px}
+.conf-item{font-weight:600;font-size:15px}
+.conf-mais{align-self:flex-start;font-size:12.5px;font-weight:600}
+.conf-bts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.conf-bts button{border:2px solid var(--line);background:var(--surface);border-radius:10px;padding:12px 6px;font-weight:700;font-size:14px;color:var(--muted);min-height:48px}
+.conf-bts .conf-sim[aria-pressed="true"]{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.conf-bts .conf-nao[aria-pressed="true"]{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
+.conf-extra{display:flex;flex-direction:column;gap:8px;padding-top:2px}
+@media (min-width:560px){.conf-linha{flex-direction:row;align-items:center;flex-wrap:wrap}.conf-txt{flex:1;min-width:0}.conf-bts{width:300px}.conf-extra{flex-basis:100%}}

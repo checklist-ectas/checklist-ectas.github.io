@@ -165,6 +165,10 @@ function doPost(e) {
     if (b.acao === "supPing") return json_({ ok: true });
     if (b.acao === "supFoto") return json_(verFoto_(b.id));
     if (b.acao === "supCarregar") return json_(carregar_());
+    if (b.acao === "supSalvarObra") {
+      const lk = LockService.getScriptLock(); lk.waitLock(25000);
+      try { return json_(salvarObras_([b.obra || {}], "Supervisor")); } finally { lk.releaseLock(); }
+    }
     return json_({ ok: false, erro: "ação desconhecida" });
   }
   if (String(b.codigo || "") !== codigo_()) return json_({ ok: false, erro: "codigo" });

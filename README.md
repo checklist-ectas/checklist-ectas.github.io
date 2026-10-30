@@ -3,7 +3,8 @@
 - **Equipe de campo:** https://checklist-ectas.github.io/campo
 - **Supervisor:** https://checklist-ectas.github.io/supervisor
 
-O painel do supervisor é só de consulta: obras, liberação para mobilização, itens em aberto, fotos e resultados mês a mês com o total do ano.
+O **supervisor** cadastra as obras e envia o link de cada obra para a equipe. A **equipe de campo** só confere: cada item é marcado como Conferido ou Não conferido, com observação e foto opcionais.
+No painel, o supervisor acompanha as obras, a liberação para mobilização, os itens não conferidos, as fotos e os resultados mês a mês com o total do ano.
 Com a central ligada, ele lê a planilha da central (pede a senha do supervisor). Sem a central, importa os arquivos Excel exportados pelo app de campo.
 
 Checklist de pré-instalação preenchido no celular pela equipe de campo: status de cada item, responsável, prazos, observações e fotos.
