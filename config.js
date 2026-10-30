@@ -1,3 +1,2 @@
-// Endereço da central (Google Apps Script). Deixe url vazio para usar só no celular.
-// Depois de implantar o central-Code.gs.txt, cole aqui o URL do "App da Web".
-window.CENTRAL={url:""};
+/* Endereço da central (Google Apps Script) que guarda as obras, as respostas e as fotos. */
+window.CENTRAL = { url: "https://script.google.com/macros/s/AKfycbzpgPj0uxIfkeLYa9Q2MAWDpcQnj89s_zqHmtT5q9oG2WshCo0UVlnxK-HdiXpA92Tg/exec" };
