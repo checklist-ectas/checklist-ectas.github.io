@@ -30,7 +30,7 @@ const COL_OBRAS = [
   ["modelo", "Modelo / Tipo de ETE"], ["respEctas", "Responsável ECTAS"], ["tecnico", "Técnico responsável (campo)"],
   ["contato", "Contato do cliente"], ["telefone", "Telefone / E-mail"], ["dataVerificacao", "Data da verificação"],
   ["previsaoMob", "Previsão de mobilização"], ["dataRealMob", "Data real de mobilização"], ["situacao", "Situação da obra"],
-  ["obs", "Observações gerais"], ["em", "Atualizado em"], ["por", "Atualizado por"]
+  ["obs", "Observações gerais"], ["em", "Atualizado em"], ["por", "Atualizado por"], ["liberadoCampo", "Autorizado ao campo em"]
 ];
 const COL_REG = [
   ["obra", "ID Obra"], ["cod", "Código item"], ["categoria", "Categoria"], ["item", "Item de verificação"],
@@ -43,7 +43,7 @@ const COL_ITENS = [["codigo", "Código"], ["categoria", "Categoria"], ["item", "
   ["etapa", "Etapa limite"], ["referencia", "Referência"], ["ativo", "Ativo (Sim/Não)"]];
 const COL_TEC = [["nome", "Nome do técnico"], ["codigo", "Código pessoal"], ["telefone", "Telefone (WhatsApp)"], ["ativo", "Ativo (Sim/Não)"]];
 const DATAS = ["dataVerificacao", "previsaoMob", "dataRealMob", "prev", "concl"];
-const CARIMBO = ["em"];
+const CARIMBO = ["em", "liberadoCampo"];
 
 const ITENS_PADRAO = [
   ["CIV-01", "Civil", "Bases para os tanques (cotas de nível conforme Guia Civil)", "Mobilização", "Guia Civil"],
@@ -287,7 +287,8 @@ function salvarItens_(mudancas, autor, minhas) {
   const cat = {}; itens_().forEach(i => cat[i.codigo] = i);
   const aceitas = [], ignoradas = [], recusadas = [];
   const plano = Object.keys(cat).filter(c => cat[c].ativo && norm_(cat[c].categoria) === "PLANEJAMENTO");
-  const planejamentoOk = obra => plano.every(c => { const r = porChave[obra + "|" + c]; return r && (r.status === "Concluído" || r.status === "Não aplicável"); });
+  const autorizadas = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id && o.liberadoCampo) autorizadas[o.id] = true; });
+  const planejamentoOk = obra => !!autorizadas[obra];   // campo liberado só depois da autorização do supervisor
   mudancas.forEach(m => {
     const obra = idObra_(m.obra), cod = String(m.cod || "").trim(); if (!obra || !cod) return;
     const k = obra + "|" + cod;

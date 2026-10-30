@@ -42,6 +42,14 @@ select.ano{padding:8px 10px;border-radius:10px;border:1px solid var(--line);back
 svg text{fill:var(--muted);font-family:var(--font);font-size:11px}
 .drop{border:2px dashed var(--line);border-radius:var(--r);padding:22px;text-align:center;color:var(--muted)}
 .drop.on{border-color:var(--azul);background:var(--surface2)}
+.pl-linha{display:grid;grid-template-columns:1fr 140px 140px 186px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.pl-linha.pl-atras .ck-item::after{content:" · atrasado";color:var(--bad);font-weight:700;font-size:12px}
+.pl-data{display:flex;flex-direction:column;gap:2px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.pl-data input{font-size:14px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);width:100%;min-width:0}
+.pl-bts{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.pl-rodape{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:14px 0 6px}
+.pl-rodape.ok b{color:var(--ok)}
+@media (max-width:760px){.pl-linha{grid-template-columns:1fr 1fr}.pl-linha .ck-txt,.pl-linha .pl-bts{grid-column:1/-1}}
 </style>
 </head>
 <body>
@@ -57,6 +65,6 @@ svg text{fill:var(--muted);font-family:var(--font);font-size:11px}
 <script src="../config.js?v=1"></script>
 <script src="../lib/xlsx.full.min.js"></script>
 <script src="itens.js?v=1"></script>
-<script src="painel.js?v=8"></script>
+<script src="painel.js?v=9"></script>
 </body>
 </html>

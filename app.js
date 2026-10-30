@@ -248,7 +248,7 @@ function desenharLista() {
     return h("button", { class: "card obra", onclick: () => ir("obra-" + o.id) },
       h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "grow" }),
         planejamento(o).liberada ? h("span", { class: "pill " + (r.vazio ? "p-warn" : r.nao ? "p-bad" : "p-ok"), text: r.vazio ? r.vazio + " sem resposta" : r.nao ? r.nao + " com Não" : "Tudo Sim" })
-          : h("span", { class: "pill p-na", text: "Aguardando planejamento" })),
+          : h("span", { class: "pill p-na", text: "Aguardando autorização" })),
       h("h3", { text: o.nome || "(sem nome)" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") }),
       h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
       h("div", { class: "row meta" }, h("span", { text: `${r.sim + r.nao} de ${r.total} respondidos · ${r.sim} Sim · ${r.nao} Não` }), h("span", { class: "grow" }),
@@ -260,7 +260,7 @@ const ehPlanejamento = it => semAc(it.categoria) === "planejamento";
 const itensCampo = o => itensAtivos(o).filter(it => !ehPlanejamento(it));
 function planejamento(o) { const its = itensAtivos(o).filter(ehPlanejamento);
   const ok = its.filter(it => ["Concluído", "Não aplicável"].includes(reg(o, it.codigo).status)).length;
-  return { total: its.length, ok, liberada: ok === its.length }; }
+  return { total: its.length, ok, liberada: !!o.liberadoCampo }; }   // liberada só com a autorização enviada pelo supervisor
 /* Lista de checagem: Sim = "Concluído", Não = "Pendente" (status da planilha), sem resposta = vazio */
 const resposta = r => r.status === "Concluído" ? "sim" : r.status ? "nao" : "";
 function resumoCampo(o) { let sim = 0, nao = 0, total = 0, mob = 0;
@@ -275,8 +275,8 @@ function telaObra(id) {
   const r = resumoCampo(o);
   topo(o.nome || o.id, o.id, "");
   const pl = planejamento(o);
-  if (!pl.liberada) { $("#main").replaceChildren(h("div", { class: "card vazio" }, h("h2", { text: "Aguardando o planejamento do supervisor" }),
-      h("p", { text: `O supervisor já concluiu ${pl.ok} de ${pl.total} itens de planejamento. Quando ele terminar, o checklist desta obra é liberado aqui.` }),
+  if (!pl.liberada) { $("#main").replaceChildren(h("div", { class: "card vazio" }, h("h2", { text: "Aguardando a autorização do supervisor" }),
+      h("p", { text: `Planejamento: ${pl.ok} de ${pl.total} itens concluídos pelo supervisor. Quando ele enviar a autorização para o campo, o checklist desta obra aparece aqui.` }),
       CENTRAL.url ? h("button", { class: "btn sec", style: "margin:8px auto 0", onclick: () => sincronizar() }, "Verificar de novo") : h("p", { class: "meta", text: "Peça ao supervisor o link atualizado depois que ele concluir o planejamento." })));
     return; }
   const its = itensCampo(o).filter(i => reg(o, i.codigo).status !== "Não aplicável"), cats = [...new Set(its.map(i => i.categoria))];
