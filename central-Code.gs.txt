@@ -192,6 +192,7 @@ function doPost(e) {
     try {
       if (b.acao === "supSalvarObra") return json_(salvarObra_(b.obra || {}));
       if (b.acao === "supSalvarTecnico") return json_(salvarTecnico_(b.tecnico || {}));
+      if (b.acao === "supSalvarItens") return json_(salvarListaItens_(b.itens || []));
     } finally { lk.releaseLock(); }
     return json_({ ok: false, erro: "ação desconhecida" });
   }
@@ -232,7 +233,7 @@ function carregar_(tecnico) {
   ler_(abaReg_(), COL_REG).forEach(r => {
     const o = obras[r.obra]; if (!o || !r.cod) return;
     let fotos = []; try { fotos = JSON.parse(r.fotos || "[]"); } catch (e) { }
-    o.checklist[r.cod] = { status: r.status || "Pendente", parte: r.parte, resp: r.resp, prev: r.prev, concl: r.concl,
+    o.checklist[r.cod] = { status: r.status || "", parte: r.parte, resp: r.resp, prev: r.prev, concl: r.concl,
       link: r.link, obs: r.obs, em: r.em, por: r.por, fotos: fotos.map(id => "d:" + id) };
   });
   const out = { ok: true, itens: itens_(), obras: Object.keys(obras).map(k => obras[k]), agora: new Date().toISOString() };
@@ -263,6 +264,21 @@ function salvarTecnico_(t) {
   return { ok: true };
 }
 
+// Substitui a lista de itens (aba ITENS) pela lista carregada pelo supervisor a partir da planilha.
+// Itens que saíram da lista ficam com Ativo = Não, para não perder o que já foi respondido.
+function salvarListaItens_(lista) {
+  const novos = lista.filter(i => i && i.codigo && i.item).map(i => [String(i.codigo).trim(), limpa_(i.categoria || "Geral", 80), limpa_(i.item, 500), limpa_(i.etapa || "Mobilização", 40), limpa_(i.referencia, 200), i.ativo === false ? "Não" : "Sim"]);
+  if (!novos.length) return { ok: false, erro: "Lista de itens vazia." };
+  const sh = abaItens_(), cods = {};
+  novos.forEach(r => cods[r[0]] = true);
+  const antigos = ler_(sh, COL_ITENS).filter(i => i.codigo && !cods[String(i.codigo).trim()])
+    .map(i => [String(i.codigo).trim(), i.categoria, i.item, i.etapa, i.referencia, "Não"]);
+  const linhas = novos.concat(antigos);
+  if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, COL_ITENS.length).clearContent();
+  sh.getRange(2, 1, linhas.length, COL_ITENS.length).setValues(linhas);
+  return { ok: true, itens: novos.length };
+}
+
 function salvarItens_(mudancas, autor, minhas) {
   const sh = abaReg_();
   const atuais = ler_(sh, COL_REG), porChave = {};
@@ -280,7 +296,7 @@ function salvarItens_(mudancas, autor, minhas) {
     const it = cat[cod] || {};
     const r = {
       obra: obra, cod: cod, categoria: it.categoria || "", item: it.item || "", etapa: it.etapa || "",
-      status: d.status || "Pendente", parte: d.parte, resp: d.resp, prev: d.prev, concl: d.concl, link: d.link, obs: d.obs,
+      status: d.status || "", parte: d.parte, resp: d.resp, prev: d.prev, concl: d.concl, link: d.link, obs: d.obs,
       em: d.em || new Date().toISOString(), por: autor,
       pasta: fotos.length ? pastaObra_(obra).getUrl() : "", fotos: fotos.length ? JSON.stringify(fotos) : ""
     };

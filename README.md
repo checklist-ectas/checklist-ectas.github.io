@@ -3,7 +3,8 @@
 - **Equipe de campo:** https://checklist-ectas.github.io/campo
 - **Supervisor:** https://checklist-ectas.github.io/supervisor
 
-O **supervisor** cadastra os técnicos (cada um com um código pessoal) e as obras, escolhe o técnico responsável de cada obra e envia o link para ele. Cada técnico só vê e confere as obras liberadas para ele. A **equipe de campo** só confere: cada item é marcado como Conferido ou Não conferido, com observação e foto opcionais.
+O **supervisor** cadastra os técnicos (cada um com um código pessoal) e as obras, escolhe o técnico responsável de cada obra e envia o link para ele. Cada técnico só vê as obras liberadas para ele e responde a lista de checagem com **Sim** ou **Não** em cada item.
+Os itens da lista vêm da **aba ITENS da planilha de controle**: o supervisor carrega a planilha na aba Itens do painel. A **equipe de campo** só confere: cada item é marcado como Conferido ou Não conferido, com observação e foto opcionais.
 No painel, o supervisor acompanha as obras, a liberação para mobilização, os itens não conferidos, as fotos e os resultados mês a mês com o total do ano.
 Com a central ligada, ele lê a planilha da central (pede a senha do supervisor). Sem a central, importa os arquivos Excel exportados pelo app de campo.
 
@@ -24,5 +25,5 @@ A central é um Google Apps Script (`central-Code.gs.txt`) que guarda tudo na pl
 4. Implantar > Nova implantação > App da Web · Executar como: Eu · Acesso: Qualquer pessoa.
 5. Cole o URL em `config.js` (`window.CENTRAL={url:"..."}`) e publique.
 
-A lista padrão de itens fica na aba ITENS da planilha.
+Para mudar os itens, edite a aba ITENS da planilha de controle e carregue o arquivo na aba **Itens** do painel do supervisor.
 Nenhum dado de obra ou foto fica neste repositório.

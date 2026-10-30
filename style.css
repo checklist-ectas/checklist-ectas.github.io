@@ -122,3 +122,19 @@ textarea{resize:vertical;min-height:70px}
 .conf-bts .conf-nao[aria-pressed="true"]{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
 .conf-extra{display:flex;flex-direction:column;gap:8px;padding-top:2px}
 @media (min-width:560px){.conf-linha{flex-direction:row;align-items:center;flex-wrap:wrap}.conf-txt{flex:1;min-width:0}.conf-bts{width:300px}.conf-extra{flex-basis:100%}}
+/* lista de checagem Sim / Não */
+.ck{padding:6px 12px 8px}
+.ck-cab{display:grid;grid-template-columns:1fr 58px 58px;gap:6px;align-items:end;padding:8px 0 6px;border-bottom:2px solid var(--line);font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.ck-cab span:not(.ck-cat){text-align:center}
+.ck-cat small{font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+.ck-linha{display:grid;grid-template-columns:1fr 58px 58px;gap:6px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.ck-linha:last-child{border-bottom:none}
+.ck-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ck-item{font-size:14.5px;font-weight:500;line-height:1.35}
+.ck-n{color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
+.ck-mais{align-self:flex-start;font-size:12px;font-weight:600;padding:2px 0}
+.ck-b{height:46px;border-radius:10px;border:2px solid var(--line);background:var(--surface);font-weight:800;font-size:14px;color:var(--muted)}
+.ck-sim[aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:#fff}
+.ck-nao[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:#fff}
+.ck-linha[data-v=""] .ck-item{font-weight:600}
+.ck-linha .conf-extra{grid-column:1/-1}

@@ -46,7 +46,7 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString
 function toast(m) { const t = h("div", { class: "toast", role: "status", text: m }); document.body.append(t); setTimeout(() => t.remove(), 2800); }
 
 /* ---------- regras (as mesmas da planilha) ---------- */
-const itensAtivos = () => (E.itens && E.itens.length ? E.itens : ITENS_PADRAO).filter(i => i.ativo !== false);
+const itensAtivos = o => ((o && o.itens && o.itens.length) ? o.itens : (E.itens && E.itens.length ? E.itens : ITENS_PADRAO)).filter(i => i.ativo !== false);
 const reg = (o, c) => (o.checklist || {})[c] || {};
 const stOf = (o, c) => reg(o, c).status || "Pendente";
 function prazo(r) { const s = r.status || "Pendente";
@@ -55,7 +55,7 @@ function prazo(r) { const s = r.status || "Pendente";
   if (!r.prev) return { t: "Sem data prevista", c: "p-na" };
   return r.prev < hoje() ? { t: "Atrasado " + dias(hoje(), r.prev) + "d", c: "p-bad" } : { t: "Prazo " + fmt(r.prev), c: "p-na" }; }
 function resumo(o) { let apl = 0, conc = 0, pendMob = 0, atras = 0;
-  for (const it of itensAtivos()) { const r = reg(o, it.codigo), s = r.status || "Pendente";
+  for (const it of itensAtivos(o)) { const r = reg(o, it.codigo), s = r.status || "Pendente";
     if (s !== "Não aplicável") apl++; if (s === "Concluído") conc++;
     if (it.etapa === "Mobilização" && s !== "Concluído" && s !== "Não aplicável") pendMob++;
     if (s !== "Concluído" && s !== "Não aplicável" && r.prev && r.prev < hoje()) atras++; }
@@ -213,6 +213,7 @@ async function processarLink() {
   let o; try { o = await abrirPacote(pac, C.codigo); }
   catch (e) { telaBloqueada(pac.t); return; }
   const id = String(o.id || "").toUpperCase(); if (!/^[A-Z0-9-]+$/.test(id)) { toast("Link de obra inválido."); return; }
+  if (Array.isArray(o.itens)) o.itens = o.itens.map(r => ({ codigo: r[0], categoria: r[1], item: r[2], etapa: r[3] || "Mobilização", referencia: r[4] || "", ativo: true }));
   LK[id] = { ...(LK[id] || {}), ...o, id, _cod: C.codigo }; salvarLK(); toast("Obra " + id + " liberada para você"); ir("obra-" + id); }
 function telaBloqueada(tecnico) {
   topo("Checklist de Pré-Instalação", "Obra não liberada", "");
@@ -237,63 +238,67 @@ function desenharLista() {
   box.replaceChildren(...lista.map(o => { const r = resumoCampo(o);
     return h("button", { class: "card obra", onclick: () => ir("obra-" + o.id) },
       h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "grow" }),
-        h("span", { class: "pill " + (r.nao ? "p-bad" : "p-ok"), text: r.nao ? r.nao + " não conferido(s)" : "Tudo conferido" })),
+        h("span", { class: "pill " + (r.vazio ? "p-warn" : r.nao ? "p-bad" : "p-ok"), text: r.vazio ? r.vazio + " sem resposta" : r.nao ? r.nao + " com Não" : "Tudo Sim" })),
       h("h3", { text: o.nome || "(sem nome)" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") }),
       h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
-      h("div", { class: "row meta" }, h("span", { text: `${r.conf} de ${r.total} conferidos` }), h("span", { class: "grow" }),
+      h("div", { class: "row meta" }, h("span", { text: `${r.sim + r.nao} de ${r.total} respondidos · ${r.sim} Sim · ${r.nao} Não` }), h("span", { class: "grow" }),
         o.previsaoMob ? h("span", { text: "Mobilização " + fmt(o.previsaoMob) }) : null)); })); }
 
-/* Conferido = Concluído · Não conferido = Pendente (mesmos status da planilha) */
-function resumoCampo(o) { let conf = 0, total = 0, mob = 0;
-  for (const it of itensAtivos()) { const s = stOf(o, it.codigo); if (s === "Não aplicável") continue; total++;
-    if (s === "Concluído") conf++; else if (it.etapa === "Mobilização") mob++; }
-  return { conf, total, nao: total - conf, mob, pct: total ? conf / total : 0 }; }
+/* Lista de checagem: Sim = "Concluído", Não = "Pendente" (status da planilha), sem resposta = vazio */
+const resposta = r => r.status === "Concluído" ? "sim" : r.status ? "nao" : "";
+function resumoCampo(o) { let sim = 0, nao = 0, total = 0, mob = 0;
+  for (const it of itensAtivos(o)) { const r = reg(o, it.codigo); if (r.status === "Não aplicável") continue; total++;
+    const v = resposta(r); if (v === "sim") sim++; else { if (v === "nao") nao++; if (it.etapa === "Mobilização") mob++; } }
+  return { sim, nao, vazio: total - sim - nao, total, mob, conf: sim, pct: total ? sim / total : 0 }; }
 
 function telaObra(id) {
   const o = obraView(id);
   if (!o) { topo("Obra", "", ""); $("#main").replaceChildren(h("div", { class: "vazio" }, h("h2", { text: "Obra não encontrada" }), h("p", { text: "Peça ao supervisor o link desta obra." }))); return; }
   const r = resumoCampo(o);
   topo(o.nome || o.id, o.id, "");
-  const its = itensAtivos(), cats = [...new Set(its.map(i => i.categoria))];
+  const its = itensAtivos(o).filter(i => reg(o, i.codigo).status !== "Não aplicável"), cats = [...new Set(its.map(i => i.categoria))];
   const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
     h("div", { class: "meta", text: [o.cliente, o.cidade, o.modelo].filter(Boolean).join(" · ") }),
     o.previsaoMob || o.respEctas ? h("div", { class: "meta", text: [o.previsaoMob ? "Mobilização prevista " + fmt(o.previsaoMob) : "", o.respEctas ? "Responsável ECTAS: " + o.respEctas : ""].filter(Boolean).join(" · ") }) : null,
     h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
     h("div", { class: "stats", style: "grid-template-columns:repeat(3,1fr)" },
-      h("div", { class: "stat" }, h("b", { text: r.conf, style: "color:var(--ok)" }), h("span", { text: "Conferidos" })),
-      h("div", { class: "stat" }, h("b", { text: r.nao, style: r.nao ? "color:var(--bad)" : "" }), h("span", { text: "Não conferidos" })),
-      h("div", { class: "stat" }, h("b", { text: r.mob, style: r.mob ? "color:var(--bad)" : "" }), h("span", { text: "Faltam p/ mobilizar" }))),
+      h("div", { class: "stat" }, h("b", { text: r.sim, style: "color:var(--ok)" }), h("span", { text: "Sim" })),
+      h("div", { class: "stat" }, h("b", { text: r.nao, style: r.nao ? "color:var(--bad)" : "" }), h("span", { text: "Não" })),
+      h("div", { class: "stat" }, h("b", { text: r.vazio, style: r.vazio ? "color:var(--warn)" : "" }), h("span", { text: "Sem resposta" }))),
     h("button", { class: "btn wa", onclick: () => enviarPdf(o) }, "Enviar checklist em PDF"));
-  const filtros = [["todos", "Todos"], ["abertos", "Não conferidos"], ...cats.map(c => ["cat:" + c, c])];
+  const filtros = [["todos", "Todos"], ["vazio", "Sem resposta"], ["nao", "Não"], ...cats.map(c => ["cat:" + c, c])];
   if (!filtros.some(f => f[0] === UI.filtroItens)) UI.filtroItens = "todos";
   const chips = h("div", { class: "chips", role: "group", "aria-label": "Filtrar itens" }, filtros.map(([k, t]) =>
     h("button", { class: "chip", "aria-pressed": String(UI.filtroItens === k), onclick: () => { UI.filtroItens = k; render(); } }, t)));
-  const lista = [];
+  const lista = []; let n = 0; const numero = {};
+  for (const it of cats.flatMap(c => its.filter(i => i.categoria === c))) numero[it.codigo] = ++n;
   for (const c of cats) {
-    let ci = its.filter(i => i.categoria === c && stOf(o, i.codigo) !== "Não aplicável");
-    const tot = ci.length, ok = ci.filter(i => stOf(o, i.codigo) === "Concluído").length;
-    ci = ci.filter(i => { if (UI.filtroItens === "abertos") return stOf(o, i.codigo) !== "Concluído";
+    let ci = its.filter(i => i.categoria === c);
+    const tot = ci.length, resp = ci.filter(i => resposta(reg(o, i.codigo))).length;
+    ci = ci.filter(i => { const v = resposta(reg(o, i.codigo));
+      if (UI.filtroItens === "vazio") return !v; if (UI.filtroItens === "nao") return v === "nao";
       if (UI.filtroItens.startsWith("cat:")) return i.categoria === UI.filtroItens.slice(4); return true; });
     if (!ci.length) continue;
-    const grupo = h("div", { class: "card lista-conf" }, h("div", { class: "cat", style: "margin:0 0 4px" }, c, h("span", { text: `${ok}/${tot}` })));
-    for (const it of ci) grupo.append(linhaItem(o, it));
+    const grupo = h("div", { class: "card ck" },
+      h("div", { class: "ck-cab" }, h("span", { class: "ck-cat" }, c, h("small", { text: ` ${resp}/${tot}` })), h("span", { text: "Sim" }), h("span", { text: "Não" })));
+    for (const it of ci) grupo.append(linhaItem(o, it, numero[it.codigo]));
     lista.push(grupo);
   }
-  if (!lista.length) lista.push(h("p", { class: "vazio", text: UI.filtroItens === "abertos" ? "Todos os itens foram conferidos." : "Nenhum item neste filtro." }));
+  if (!lista.length) lista.push(h("p", { class: "vazio", text: UI.filtroItens === "vazio" ? "Todos os itens foram respondidos." : UI.filtroItens === "nao" ? "Nenhum item marcado como Não." : "Nenhum item neste filtro." }));
   $("#main").replaceChildren(head, chips, ...lista); }
 
-function linhaItem(o, it) {
-  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), conf = (r.status || "Pendente") === "Concluído", aberto = UI.abertos.has(key);
-  const marcar = v => { if (v === conf && (r.status || "") !== "") return;
-    alterarItem(o.id, it.codigo, v ? { status: "Concluído", concl: r.concl || hoje() } : { status: "Pendente", concl: "" }); };
-  const extras = [(r.fotos || []).length ? "📷 " + r.fotos.length : "", r.obs ? "✎ " + (r.obs.length > 40 ? r.obs.slice(0, 40) + "…" : r.obs) : ""].filter(Boolean).join("  ");
-  const linha = h("div", { class: "conf-linha", "data-c": conf ? "1" : (r.status ? "0" : "") },
-    h("div", { class: "conf-txt" }, h("span", { class: "conf-item", text: it.item }),
-      h("button", { class: "more conf-mais", "aria-expanded": String(aberto), onclick: () => { aberto ? UI.abertos.delete(key) : UI.abertos.add(key); render(); } },
-        extras || (aberto ? "Fechar" : "+ observação / foto"))),
-    h("div", { class: "conf-bts", role: "group", "aria-label": it.item },
-      h("button", { class: "conf-sim", "aria-pressed": String(conf), onclick: () => marcar(true) }, "✓ Conferido"),
-      h("button", { class: "conf-nao", "aria-pressed": String(!conf && !!r.status), onclick: () => marcar(false) }, "✗ Não conferido")));
+function linhaItem(o, it, num) {
+  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), v = resposta(r), aberto = UI.abertos.has(key);
+  const marcar = novo => { if (novo === v) return alterarItem(o.id, it.codigo, { status: "", concl: "" });   // tocar de novo limpa a resposta
+    alterarItem(o.id, it.codigo, novo === "sim" ? { status: "Concluído", concl: r.concl || hoje() } : { status: "Pendente", concl: "" }); };
+  const extras = [(r.fotos || []).length ? "📷 " + r.fotos.length : "", r.obs ? "✎ " + (r.obs.length > 34 ? r.obs.slice(0, 34) + "…" : r.obs) : ""].filter(Boolean).join("  ");
+  const linha = h("div", { class: "ck-linha", "data-v": v },
+    h("div", { class: "ck-txt" },
+      h("span", { class: "ck-item" }, h("b", { class: "ck-n", text: num + ". " }), it.item),
+      h("button", { class: "more ck-mais", "aria-expanded": String(aberto), onclick: () => { aberto ? UI.abertos.delete(key) : UI.abertos.add(key); render(); } },
+        extras || (aberto ? "Fechar" : "+ obs / foto"))),
+    h("button", { class: "ck-b ck-sim", "aria-pressed": String(v === "sim"), "aria-label": "Sim: " + it.item, onclick: () => marcar("sim") }, "Sim"),
+    h("button", { class: "ck-b ck-nao", "aria-pressed": String(v === "nao"), "aria-label": "Não: " + it.item, onclick: () => marcar("nao") }, "Não"));
   if (aberto) linha.append(obsFoto(o, it, r));
   return linha; }
 
@@ -361,8 +366,8 @@ function exportarExcel() {
   const R = [["ID Obra", "Código item", "Categoria", "Item de verificação", "Etapa limite", "Status", "Parte responsável", "Responsável (nome)", "Data prevista", "Data conclusão", "Evidência (link foto/doc)", "Observações / Pendências", "Última atualização", "Atualizado por"]];
   for (const o of idsObras().sort().map(obraView)) {
     O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.tecnico || C.autor, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs].map(x => x == null ? "" : x));
-    for (const it of itensAtivos()) { const r = reg(o, it.codigo);
-      R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, r.status || "Pendente", r.parte || "", r.resp || "", d(r.prev), d(r.concl),
+    for (const it of itensAtivos(o)) { const r = reg(o, it.codigo);
+      R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, r.status || "", r.parte || "", r.resp || "", d(r.prev), d(r.concl),
         [r.link, (r.fotos || []).length ? r.fotos.length + " foto(s)" : ""].filter(Boolean).join(" | "), r.obs || "", r.em ? new Date(r.em) : "", r.por || ""]); } }
   const wb = XLSX.utils.book_new();
   const w1 = XLSX.utils.aoa_to_sheet(O, { cellDates: true, dateNF: "dd/mm/yyyy" }), w2 = XLSX.utils.aoa_to_sheet(R, { cellDates: true, dateNF: "dd/mm/yyyy" });
@@ -385,20 +390,20 @@ async function enviarPdf(o) {
   cab();
   doc.setFontSize(9); doc.setTextColor(29, 29, 27);
   const linhasInfo = [["Obra", o.nome], ["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
-    ["Previsão de mobilização", fmt(o.previsaoMob)], ["Conferência", r.conc + " de " + r.apl + " itens conferidos (" + Math.round(r.pct * 100) + "%) · " + (r.apl - r.conc) + " não conferido(s) · " + r.pendMob + " deles necessário(s) para mobilizar"]];
+    ["Previsão de mobilização", fmt(o.previsaoMob)], ["Checagem", (() => { const q = resumoCampo(o); return q.sim + " Sim · " + q.nao + " Não · " + q.vazio + " sem resposta (de " + q.total + " itens)"; })()]];
   for (const [k, v] of linhasInfo) { if (!v) continue; doc.setFont("helvetica", "bold"); doc.text(k + ":", M, y); doc.setFont("helvetica", "normal");
     const t = doc.splitTextToSize(String(v), W - 2 * M - 42); doc.text(t, M + 42, y); y += 4.6 * t.length; }
   y += 3;
-  const cols = [[M, 15, "Cód."], [M + 15, 70, "Item"], [M + 85, 22, "Status"], [M + 107, 28, "Responsável"], [M + 135, 18, "Prazo"], [M + 153, W - 2 * M - 153, "Observações"]];
+  const cols = [[M, 15, "Cód."], [M + 15, 70, "Item"], [M + 85, 22, "Resposta"], [M + 107, 28, "Responsável"], [M + 135, 18, "Prazo"], [M + 153, W - 2 * M - 153, "Observações"]];
   const cabTab = () => { doc.setFillColor(...NAVY); doc.rect(M, y - 4, W - 2 * M, 6, "F"); doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(8);
     for (const c of cols) doc.text(c[2], c[0] + 1, y); y += 4; doc.setTextColor(29, 29, 27); doc.setFont("helvetica", "normal"); };
   cabTab();
-  const cor = { "Concluído": [30, 123, 74], "Em andamento": [163, 18, 42], "Pendente": [163, 18, 42], "Não aplicável": [96, 96, 96] };
+  const cor = { "Concluído": [30, 123, 74], "Em andamento": [163, 18, 42], "Pendente": [163, 18, 42], "Não aplicável": [96, 96, 96], "": [138, 90, 0] };
   let catAtual = "";
-  const ordem = [...new Set(itensAtivos().map(i => i.categoria))];
-  for (const it of ordem.flatMap(c => itensAtivos().filter(i => i.categoria === c))) {
-    const g = reg(o, it.codigo), s = g.status || "Pendente";
-    const cel = [it.codigo, it.item, s === "Concluído" ? "Conferido" : s === "Não aplicável" ? "Não se aplica" : "Não conferido", [g.parte, g.resp].filter(Boolean).join(" - "), g.concl ? "Ok " + fmt(g.concl).slice(0, 5) : g.prev ? fmt(g.prev) : "", g.obs || ""];
+  const ordem = [...new Set(itensAtivos(o).map(i => i.categoria))];
+  for (const it of ordem.flatMap(c => itensAtivos(o).filter(i => i.categoria === c))) {
+    const g = reg(o, it.codigo), s = g.status || "";
+    const cel = [it.codigo, it.item, g.status === "Concluído" ? "Sim" : g.status === "Não aplicável" ? "Não se aplica" : g.status ? "Não" : "Sem resposta", [g.parte, g.resp].filter(Boolean).join(" - "), g.concl ? "Ok " + fmt(g.concl).slice(0, 5) : g.prev ? fmt(g.prev) : "", g.obs || ""];
     const quebras = cel.map((t, i) => doc.splitTextToSize(String(t), cols[i][1] - 2));
     const alt = Math.max(...quebras.map(q => q.length)) * 3.4 + 2.2;
     if (it.categoria !== catAtual) { if (y + 6 + alt > 285) { doc.addPage(); cab(); cabTab(); }
@@ -409,9 +414,9 @@ async function enviarPdf(o) {
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7); doc.setTextColor(...CINZA);
     doc.text("Gerado em " + new Date().toLocaleString("pt-BR") + (C.autor ? " por " + C.autor : "") + " · ECTAS Saneamento", M, 292); doc.text(i + "/" + n, W - M, 292, { align: "right" }); }
-  const pend = itensAtivos().filter(it => !["Concluído", "Não aplicável"].includes(stOf(o, it.codigo)));
-  const texto = `Checklist de pré-instalação - ${o.id} ${o.nome || ""}\n${r.conc} de ${r.apl} itens conferidos · ${pend.length} não conferido(s)` +
-    (r.pendMob ? `\nNão conferidos necessários para mobilizar: ${itensAtivos().filter(it => it.etapa === "Mobilização" && pend.includes(it)).map(it => it.codigo).join(", ")}` : "");
+  const pend = itensAtivos(o).filter(it => !["Concluído", "Não aplicável"].includes(stOf(o, it.codigo)));
+  const texto = `Checklist de pré-instalação - ${o.id} ${o.nome || ""}\n${resumoCampo(o).sim} Sim · ${resumoCampo(o).nao} Não · ${resumoCampo(o).vazio} sem resposta` +
+    (r.pendMob ? `\nItens de mobilização ainda sem Sim: ${itensAtivos(o).filter(it => it.etapa === "Mobilização" && pend.includes(it)).map(it => it.codigo).join(", ")}` : "");
   entregar(doc.output("blob"), `Checklist ${o.id} ${hoje()}.pdf`, texto); }
 
 /* ---------- início ---------- */

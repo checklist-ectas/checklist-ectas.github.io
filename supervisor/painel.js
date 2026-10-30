@@ -10,7 +10,7 @@ let D = ler("sup-dados", { obras: {}, itens: [], fonte: "", em: null });   // da
 let SENHA = ler("sup-senha", "");
 const UI = { aba: "obras", filtro: "ativas", busca: "", ano: new Date().getFullYear(), obra: null, form: null, link: null, carregando: false, erro: "" };
 const SITUACOES = ["Em pré-instalação", "Mobilizada", "Instalação concluída", "Suspensa", "Cancelada"];
-const ROTULO = { "Concluído": "Conferido", "Pendente": "Não conferido", "Em andamento": "Não conferido", "Não aplicável": "Não se aplica" };
+const ROTULO = { "Concluído": "Sim", "Pendente": "Não", "Em andamento": "Não", "Não aplicável": "Não se aplica", "": "Sem resposta" };
 const APP_CAMPO = "https://checklist-ectas.github.io/campo";
 
 const $ = s => document.querySelector(s);
@@ -25,7 +25,7 @@ const dias = (a, b) => Math.round((new Date(a + "T12:00") - new Date(b + "T12:00
 const pct = x => Math.round(x * 100) + "%";
 
 /* ---------- regras (as mesmas do app e da planilha) ---------- */
-const itensAtivos = () => (D.itens || []).filter(i => i.ativo !== false);
+const itensAtivos = () => ((D.itens && D.itens.length) ? D.itens : ITENS_BASE()).filter(i => i.ativo !== false);
 const reg = (o, c) => (o.checklist || {})[c] || {};
 function situacaoPrazo(r) { const s = r.status || "Pendente";
   if (s === "Não aplicável") return "N/A";
@@ -71,7 +71,7 @@ async function importar(arquivos) {
       for (const r of XLSX.utils.sheet_to_json(sr, { defval: "" })) { const id = String(r["ID Obra"] || "").trim().toUpperCase(), cod = String(r["Código item"] || "").trim(); if (!id || !cod) continue;
         if (!cat.has(cod)) cat.set(cod, { codigo: cod, categoria: r["Categoria"], item: r["Item de verificação"], etapa: r["Etapa limite"] || "Mobilização", ativo: true });
         const o = base.obras[id] || (base.obras[id] = { id, checklist: {} });
-        const novo = { status: r["Status"] || "Pendente", parte: r["Parte responsável"], resp: r["Responsável (nome)"], prev: dIso(r["Data prevista"]), concl: dIso(r["Data conclusão"]),
+        const novo = { status: r["Status"] || "", parte: r["Parte responsável"], resp: r["Responsável (nome)"], prev: dIso(r["Data prevista"]), concl: dIso(r["Data conclusão"]),
           link: r["Evidência (link foto/doc)"], obs: r["Observações / Pendências"], em: tIso(r["Última atualização"]), por: r["Atualizado por"] || "" };
         const velho = o.checklist[cod];
         if (!velho || (novo.em && (!velho.em || novo.em > velho.em)) || (!velho.em && !novo.em)) { o.checklist[cod] = novo; nItens++; } }
@@ -102,9 +102,9 @@ function render() {
   if (UI.form) { m.replaceChildren(...kids, telaForm(UI.form === "nova" ? null : D.obras[UI.form])); return; }
   if (UI.obra && D.obras[UI.obra]) { m.replaceChildren(...kids, telaObra(D.obras[UI.obra])); return; }
   kids.push(kpis());
-  kids.push(h("div", { class: "tabs", role: "tablist" }, [["obras", "Obras"], ["mes", "Mês a mês"], ["tec", "Técnicos"]].map(([k, t]) =>
+  kids.push(h("div", { class: "tabs", role: "tablist" }, [["obras", "Obras"], ["mes", "Mês a mês"], ["tec", "Técnicos"], ["itens", "Itens"]].map(([k, t]) =>
     h("button", { role: "tab", "aria-selected": String(UI.aba === k), onclick: () => { UI.aba = k; render(); } }, t))));
-  kids.push(UI.aba === "mes" ? telaMes() : UI.aba === "tec" ? telaTecnicos() : telaObras());
+  kids.push(UI.aba === "mes" ? telaMes() : UI.aba === "tec" ? telaTecnicos() : UI.aba === "itens" ? telaItens() : telaObras());
   m.replaceChildren(...kids); }
 
 function telaSenha(m) {
@@ -172,11 +172,11 @@ function telaObra(o) {
   const corpo = [];
   for (const c of cats) { corpo.push(h("tr", {}, h("td", { colspan: "7", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c })));
     for (const it of itensAtivos().filter(i => i.categoria === c)) { const g = reg(o, it.codigo), s = g.status || "Pendente", sp = situacaoPrazo(g);
-      const cls = { "Concluído": "p-ok", "Em andamento": "p-bad", "Pendente": "p-bad", "Não aplicável": "p-na" }[s];
+      const cls = { "Concluído": "p-ok", "Em andamento": "p-bad", "Pendente": "p-bad", "Não aplicável": "p-na" }[g.status || ""] || "p-warn";
       const fotos = (g.fotos || []).filter(f => String(f).startsWith("d:"));
       const thumbs = fotos.length && D.fonte === "central" ? h("div", { class: "thumbs" }, fotos.map(f => { const ph = h("div", { class: "ph", text: "foto" }); carregarFoto(f.slice(2), ph); return ph; })) : null;
       corpo.push(h("tr", {}, h("td", {}, h("span", { class: "code", text: it.codigo })), h("td", {}, it.item, h("div", { class: "meta", text: "Até " + it.etapa })),
-        h("td", {}, h("span", { class: "pill " + cls, text: ROTULO[s] || s })), h("td", { text: [g.parte, g.resp].filter(Boolean).join(" · ") }),
+        h("td", {}, h("span", { class: "pill " + cls, text: ROTULO[g.status || ""] || g.status })), h("td", { text: [g.parte, g.resp].filter(Boolean).join(" · ") }),
         h("td", { class: "n", text: g.prev ? fmt(g.prev) : "" }, h("div", { class: "meta", text: sp === "Atrasado" ? "Atrasado " + dias(hoje(), g.prev) + "d" : sp === "Concluído com atraso" ? "com atraso" : "" })),
         h("td", { class: "n", text: fmt(g.concl) }),
         h("td", {}, g.obs || "", g.link ? h("div", {}, h("a", { href: g.link, target: "_blank", rel: "noopener", text: "evidência" })) : null, thumbs,
@@ -248,6 +248,54 @@ async function salvarObra(d, aviso) {
 // lista de itens usada antes de importar o primeiro Excel (a mesma do app de campo)
 function ITENS_BASE() { return (window.ITENS_CAMPO || []).map(r => ({ codigo: r[0], categoria: r[1], item: r[2], etapa: r[3], referencia: r[4], ativo: true })); }
 
+/* ---------- itens do checklist (carregados da planilha) ---------- */
+const ETAPAS = ["Mobilização", "Montagem", "Testes", "Start-up"];
+function lerItensDaPlanilha(wb) {
+  const nomes = wb.SheetNames;
+  const aba = nomes.find(n => /^itens$/i.test(n.trim())) || nomes.find(n => /iten/i.test(n)) || nomes[0];
+  const linhas = XLSX.utils.sheet_to_json(wb.Sheets[aba], { header: 1, defval: "" });
+  const sem = t => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+  let cab = -1, col = {};
+  for (let i = 0; i < Math.min(linhas.length, 15) && cab < 0; i++) {
+    const r = linhas[i].map(sem);
+    const iItem = r.findIndex(c => /^item/.test(c) || /verifica/.test(c));
+    if (iItem >= 0 && r.some(c => /^cod/.test(c) || /^categ/.test(c))) {
+      cab = i; col = { item: iItem, codigo: r.findIndex(c => /^cod/.test(c)), categoria: r.findIndex(c => /^categ/.test(c)),
+        etapa: r.findIndex(c => /etapa/.test(c)), referencia: r.findIndex(c => /refer/.test(c)), ativo: r.findIndex(c => /^ativo/.test(c)) }; } }
+  if (cab < 0) throw new Error(`Não achei o cabeçalho na aba "${aba}". A aba precisa ter as colunas Código, Categoria e Item de verificação.`);
+  const pega = (r, k) => col[k] >= 0 ? String(r[col[k]] ?? "").trim() : "";
+  const lista = [], vistos = new Set(); let n = 0;
+  for (const r of linhas.slice(cab + 1)) {
+    const item = pega(r, "item"); if (!item) continue;
+    let codigo = pega(r, "codigo").toUpperCase().replace(/\s+/g, "-"); if (!codigo || vistos.has(codigo)) codigo = "IT-" + String(++n).padStart(2, "0");
+    vistos.add(codigo);
+    const etapa = ETAPAS.find(e => sem(e) === sem(pega(r, "etapa"))) || "Mobilização";
+    lista.push({ codigo, categoria: pega(r, "categoria") || "Geral", item, etapa, referencia: pega(r, "referencia"), ativo: !/^n(ã|a)o$/i.test(pega(r, "ativo")) }); }
+  if (!lista.length) throw new Error(`A aba "${aba}" não tem itens abaixo do cabeçalho.`);
+  return { aba, lista }; }
+async function importarItens(f) {
+  UI.erro = "";
+  try {
+    const { aba, lista } = lerItensDaPlanilha(XLSX.read(await f.arrayBuffer()));
+    const ativos = lista.filter(i => i.ativo !== false).length;
+    if (CENTRAL.url) { await api({ acao: "supSalvarItens", itens: lista }); await carregarCentral(); }
+    else { D.itens = lista; D.itensOrigem = `${f.name} (aba ${aba}) em ${new Date().toLocaleString("pt-BR")}`; if (!D.fonte) D.fonte = "arquivos"; gravar("sup-dados", D); }
+    toast(`${ativos} itens carregados da planilha.`); render();
+  } catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : (e.message || "Não foi possível ler a planilha."); render(); } }
+function telaItens() {
+  const its = itensAtivos(), cats = [...new Set(its.map(i => i.categoria))];
+  const inp = h("input", { type: "file", id: "imp-itens", accept: ".xlsx,.xls", hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ""; if (f) importarItens(f); } });
+  return h("div", { style: "display:flex;flex-direction:column;gap:12px" },
+    h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px" },
+      h("b", { text: "Itens da lista de checagem" }),
+      h("p", { class: "meta", style: "margin:0", text: "A equipe de campo responde Sim ou Não para cada item desta lista. Para mudar os itens, edite a aba ITENS da planilha de controle (colunas Código, Categoria, Item de verificação, Etapa limite e, se quiser, Ativo) e carregue a planilha aqui." }),
+      h("p", { class: "meta", style: "margin:0", text: CENTRAL.url ? "Com a central ligada, a lista vai para todas as obras automaticamente." : "Os links das obras enviados a partir de agora levam esta lista. Obras já enviadas mantêm a lista antiga até você reenviar o link." }),
+      D.itensOrigem ? h("p", { class: "meta", style: "margin:0", text: "Última carga: " + D.itensOrigem }) : null,
+      h("label", { class: "btn", for: "imp-itens", style: "align-self:flex-start;cursor:pointer" }, "Carregar itens da planilha (Excel)"), inp),
+    h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Nº", "Código", "Item de verificação", "Etapa limite"].map(t => h("th", { text: t })))),
+      h("tbody", {}, (() => { let n = 0; return cats.flatMap(c => [h("tr", {}, h("td", { colspan: "4", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c + " · " + its.filter(i => i.categoria === c).length })),
+        ...its.filter(i => i.categoria === c).map(i => h("tr", {}, h("td", { class: "n", text: ++n }), h("td", {}, h("span", { class: "code", text: i.codigo })), h("td", { text: i.item }), h("td", { text: i.etapa })))]); })())))); }
+
 /* ---------- técnicos ---------- */
 const tecnicos = () => (D.tecnicos || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
 const tecnicoDe = nome => (D.tecnicos || []).find(t => t.nome === nome) || null;
@@ -305,6 +353,7 @@ async function linkObra(o) {
   const t = tecnicoDe(o.tecnico); if (!t) throw new Error("sem técnico");
   const campos = ["id", "nome", "cliente", "cidade", "modelo", "respEctas", "contato", "telefone", "dataVerificacao", "previsaoMob", "situacao", "obs", "tecnico"];
   const dados = {}; for (const k of campos) if (o[k]) dados[k] = o[k];
+  dados.itens = itensAtivos().map(i => [i.codigo, i.categoria, i.item, i.etapa, i.referencia || ""]);   // lista de checagem da planilha
   const chave = JSON.stringify(dados) + "|" + t.codigo;
   if (cacheLink[o.id] && cacheLink[o.id].k === chave) return cacheLink[o.id].url;
   const pac = { t: t.nome, ...(await fecharPacote(dados, t.codigo)) };
@@ -378,7 +427,7 @@ function exportar() {
   for (const o of obras()) { const r = resumo(o);
     O.push([o.id, o.nome, o.cliente, o.cidade, o.modelo, o.respEctas, o.tecnico, o.contato, o.telefone, d(o.dataVerificacao), d(o.previsaoMob), d(o.dataRealMob), o.situacao, o.obs, r.pct, r.pendMob, r.atras, r.lib.t].map(x => x == null ? "" : x));
     for (const it of itensAtivos()) { const g = reg(o, it.codigo);
-      R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, g.status || "Pendente", g.parte || "", g.resp || "", d(g.prev), d(g.concl), situacaoPrazo(g), g.link || "", g.obs || "", g.em ? new Date(g.em) : "", g.por || ""]); } }
+      R.push([o.id, it.codigo, it.categoria, it.item, it.etapa, g.status || "", g.parte || "", g.resp || "", d(g.prev), d(g.concl), situacaoPrazo(g), g.link || "", g.obs || "", g.em ? new Date(g.em) : "", g.por || ""]); } }
   const { linhas, tot } = calcMes(UI.ano);
   const M = [["Mês", "Obras c/ mobilização prevista", "Obras mobilizadas", "Mobilizadas no prazo", "Itens c/ prazo no mês", "Itens concluídos", "Concluídos no prazo", "Concluídos com atraso", "Atrasados em aberto"]];
   linhas.forEach((l, i) => M.push([MESES[i], l.prev, l.mob, l.mobPrazo, l.prazoMes, l.conc, l.noPrazo, l.atraso, l.atrasados]));
