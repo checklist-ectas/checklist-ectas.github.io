@@ -124,7 +124,7 @@ async function sincronizar() {
     E = { obras, itens: (r.itens && r.itens.length) ? r.itens : E.itens, ultimaSync: new Date().toISOString(), planilha: r.planilha || "" }; salvarE();
     setSync("Sincronizado às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
   } catch (e) {
-    if (e.codigo) { C.codigo = ""; salvarC(); setSync("Código da equipe incorreto.", true); }
+    if (e.codigo) { C.codigo = ""; salvarC(); setSync("Senha incorreta. Entre de novo.", true); }
     else setSync("Sem conexão com a central. As alterações ficam no celular.", true);
   } finally { UI.sinc = false; pintarSync(); render(); if (deNovo) { deNovo = false; agendarSync(); } } }
 function trocarFoto(obra, cod, de, para) {
@@ -170,20 +170,21 @@ function telaEntrada() {
   const msg = h("p", { class: "meta", id: "ent-msg" });
   const f = h("form", { class: "card ent", onsubmit: async e => { e.preventDefault();
       const cod = $("#e-cod").value.trim(), nomeEl = $("#e-nome"), nome = nomeEl ? nomeEl.value.trim() : "";
-      if (!/^\d{4,8}$/.test(cod)) { msg.textContent = "O código pessoal tem de 4 a 8 números."; return; }
+      if (!/^\d{4,8}$/.test(cod)) { msg.textContent = "A senha tem de 4 a 8 números."; return; }
       let autor = nome;
-      if (CENTRAL.url) { msg.textContent = "Conferindo o código…";
+      if (CENTRAL.url) { msg.textContent = "Conferindo a senha…";
         try { const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ acao: "ping", codigo: cod }) }).then(x => x.json());
-          if (!r.codigoOk) { msg.textContent = "Código não encontrado. Confira com o supervisor."; return; }
+          if (!r.codigoOk) { msg.textContent = "Senha não encontrada. Confira com o supervisor."; return; }
           autor = r.tecnico;
         } catch (err) { msg.textContent = "Sem internet agora. Conecte-se para entrar pela primeira vez."; return; } }
       else if (!nome) { msg.textContent = "Digite o seu nome."; return; }
       if (C.codigo !== cod) { E = { obras: {}, itens: E.itens, ultimaSync: null, planilha: "" }; salvarE(); }
-      C = { codigo: cod, autor }; salvarC(); ir(""); processarLink(); sincronizar(); } },
+      const destino = UI.rota.v === "obra" ? "obra-" + UI.rota.id : "";   // link de obra aberto antes de entrar
+      C = { codigo: cod, autor }; salvarC(); ir(destino); processarLink(); sincronizar(); } },
     h("h2", { text: "Acesso do técnico" }),
-    h("p", { class: "meta", text: "Digite o seu código pessoal (o supervisor envia para você). Você vai ver só as obras liberadas para você." }),
+    h("p", { class: "meta", text: "Digite a senha de acesso que o supervisor enviou para você. Você vai ver só as obras liberadas para você." }),
     CENTRAL.url ? null : h("label", { class: "f" }, "Seu nome", h("input", { id: "e-nome", required: true, autocomplete: "name", value: C.autor || "" })),
-    h("label", { class: "f" }, "Código pessoal", h("input", { id: "e-cod", required: true, inputmode: "numeric", autocomplete: "off", maxlength: "8", pattern: "[0-9]*" })),
+    h("label", { class: "f" }, "Senha de acesso", h("input", { id: "e-cod", type: "password", required: true, inputmode: "numeric", autocomplete: "off", maxlength: "8", pattern: "[0-9]*" })),
     h("button", { class: "btn", type: "submit" }, "Entrar"), msg);
   $("#main").replaceChildren(f); }
 
@@ -253,7 +254,8 @@ function resumoCampo(o) { let sim = 0, nao = 0, total = 0, mob = 0;
 
 function telaObra(id) {
   const o = obraView(id);
-  if (!o) { topo("Obra", "", ""); $("#main").replaceChildren(h("div", { class: "vazio" }, h("h2", { text: "Obra não encontrada" }), h("p", { text: "Peça ao supervisor o link desta obra." }))); return; }
+  if (!o) { topo("Obra", "", ""); $("#main").replaceChildren(h("div", { class: "vazio" }, UI.sinc ? h("h2", { text: "Buscando a obra…" }) : h("h2", { text: "Obra não encontrada" }),
+    UI.sinc ? null : h("p", { text: "Esta obra não está liberada para você, ou ainda não chegou. Confira com o supervisor." }))); return; }
   const r = resumoCampo(o);
   topo(o.nome || o.id, o.id, "");
   const its = itensAtivos(o).filter(i => reg(o, i.codigo).status !== "Não aplicável"), cats = [...new Set(its.map(i => i.categoria))];

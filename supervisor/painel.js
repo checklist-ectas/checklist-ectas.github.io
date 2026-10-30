@@ -137,11 +137,9 @@ function kpis() {
 
 function telaObras() {
   if (!Object.keys(D.obras || {}).length) {
-    const semTec = !tecnicos().some(t => t.ativo !== false);
-    return h("div", { class: "vazio" }, h("h2", { text: semTec ? "Comece cadastrando os técnicos" : "Nenhuma obra cadastrada ainda" }),
-      h("p", { text: semTec ? "Cadastre os técnicos de campo na aba Técnicos. Depois cadastre as obras e escolha o técnico responsável de cada uma."
-        : "Toque em “+ Nova obra”, escolha o técnico responsável e envie o link da obra para ele." }),
-      h("button", { class: "btn", style: "margin:10px auto 0", onclick: () => { if (semTec) UI.aba = "tec"; else UI.form = "nova"; render(); } }, semTec ? "Cadastrar técnicos" : "+ Nova obra")); }
+    return h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra cadastrada ainda" }),
+      h("p", { text: "Toque em “+ Nova obra”. No cadastro você escolhe ou cadastra o responsável de campo, e a senha de acesso dele é gerada na hora." }),
+      h("button", { class: "btn", style: "margin:10px auto 0", onclick: () => { UI.form = "nova"; render(); } }, "+ Nova obra")); }
   const q = UI.busca.trim().toLowerCase();
   const lista = obras().map(o => ({ o, r: resumo(o) })).filter(({ o, r }) => {
       if (UI.filtro === "ativas") return !encerrada(o); if (UI.filtro === "naolib") return !encerrada(o) && r.lib.t === "NÃO LIBERADA";
@@ -218,16 +216,26 @@ function telaForm(o) {
         if (!o) { d.id = d.id.toUpperCase().replace(/\s+/g, "-"); if (!/^[A-Z0-9-]+$/.test(d.id)) { msg.textContent = "Use só letras, números e hífen no ID (ex.: OBRA-014)."; return; }
           if (D.obras[d.id]) { msg.textContent = "Já existe uma obra com o ID " + d.id + "."; return; } }
         else d.id = o.id;
+        if (d.tecnico === "__novo") {
+          const nome = String(d.novoNome || "").trim(), senha = String(d.novaSenha || "").trim();
+          if (!nome) { msg.textContent = "Digite o nome do responsável de campo."; return; }
+          if (!/^\d{4,8}$/.test(senha)) { msg.textContent = "A senha do técnico tem de 4 a 8 números."; return; }
+          if (tecnicoDe(nome)) { msg.textContent = "Já existe um técnico com esse nome. Escolha-o na lista."; return; }
+          msg.textContent = "Cadastrando o responsável…";
+          if (!await salvarTecnico({ nome, codigo: senha, telefone: String(d.novoFone || "").trim(), ativo: true }, "Responsável cadastrado")) { msg.textContent = UI.erro || "Não foi possível cadastrar o responsável."; return; }
+          d.tecnico = nome; }
+        if (!d.tecnico) { msg.textContent = "Escolha o responsável de campo."; return; }
+        delete d.novoNome; delete d.novaSenha; delete d.novoFone;
         msg.textContent = "Salvando…";
+        const trocouTecnico = !o || o.tecnico !== d.tecnico;
         const ok = await salvarObra(d, o ? "Dados salvos" : "Obra cadastrada");
+        if (ok && trocouTecnico) { UI.form = null; UI.obra = d.id; UI.link = d.id; render(); scrollTo(0, 0); return; }
         if (ok) { UI.form = null; UI.obra = d.id; UI.link = o ? null : d.id; render(); scrollTo(0, 0); } else msg.textContent = UI.erro || "Não foi possível salvar."; } },
       f("id", "ID da obra", "text", { req: true, ph: "OBRA-014", ro: !!o }),
       h("label", { class: "f" }, "Situação", h("select", { id: "o-situacao", name: "situacao" }, SITUACOES.map(s => h("option", { value: s, selected: s === v.situacao || null }, s)))),
       f("nome", "Obra / empreendimento", "text", { req: true, full: true }), f("cliente", "Cliente"), f("cidade", "Cidade/UF", "text", { ph: "Joinville/SC" }),
       f("modelo", "Modelo / tipo de ETE", "text", { full: true }), f("respEctas", "Responsável ECTAS"),
-      h("label", { class: "f" }, "Técnico responsável (campo)", h("select", { id: "o-tecnico", name: "tecnico", required: true },
-        h("option", { value: "" }, tecnicos().some(t => t.ativo !== false) ? "Escolha o técnico" : "Cadastre um técnico na aba Técnicos"),
-        tecnicos().filter(t => t.ativo !== false || t.nome === v.tecnico).map(t => h("option", { value: t.nome, selected: t.nome === v.tecnico || null }, t.nome)))),
+      blocoResponsavel(v),
       f("contato", "Contato do cliente"),
       f("telefone", "Telefone / e-mail", "text", { full: true }), f("dataVerificacao", "Data da verificação", "date"), f("previsaoMob", "Previsão de mobilização", "date"),
       f("dataRealMob", "Data real de mobilização", "date"),
@@ -306,7 +314,7 @@ async function salvarTecnico(t, aviso) {
     try { await api({ acao: "supSalvarTecnico", tecnico: t }); toast(aviso); await carregarCentral(); return true; }
     catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : (e.message && e.message !== "erro" ? e.message : "Sem conexão com a central."); render(); return false; } }
   const lista = (D.tecnicos || []).filter(x => x.nome !== (t.nomeAntigo || t.nome));
-  if (lista.some(x => x.codigo === t.codigo)) { UI.erro = "Este código já é de outro técnico."; render(); return false; }
+  if (lista.some(x => x.codigo === t.codigo)) { UI.erro = "Esta senha já é de outro técnico."; render(); return false; }
   const novo = { nome: t.nome, codigo: t.codigo, telefone: t.telefone || "", ativo: t.ativo !== false };
   D.tecnicos = [...lista, novo];
   if (t.nomeAntigo && t.nomeAntigo !== t.nome) for (const o of Object.values(D.obras)) if (o.tecnico === t.nomeAntigo) o.tecnico = t.nome;
@@ -317,27 +325,43 @@ function telaTecnicos() {
   const msg = h("span", { class: "meta" });
   const form = h("form", { class: "card form", onsubmit: async e => { e.preventDefault();
       const nome = $("#t-nome").value.trim(), codigo = $("#t-cod").value.trim(), telefone = $("#t-fone").value.trim();
-      if (!nome) return; if (!/^\d{4,8}$/.test(codigo)) { msg.textContent = "O código tem de 4 a 8 números."; return; }
+      if (!nome) return; if (!/^\d{4,8}$/.test(codigo)) { msg.textContent = "A senha tem de 4 a 8 números."; return; }
       if (tecnicoDe(nome)) { msg.textContent = "Já existe um técnico com esse nome."; return; }
       if (await salvarTecnico({ nome, codigo, telefone, ativo: true }, "Técnico cadastrado")) { $("#t-nome").value = ""; $("#t-fone").value = ""; $("#t-cod").value = novoCodigo(); } } },
     h("div", { class: "full", style: "font-weight:700", text: "Cadastrar técnico de campo" }),
     h("label", { class: "f" }, "Nome", h("input", { id: "t-nome", required: true, autocomplete: "off" })),
     h("label", { class: "f" }, "Telefone (WhatsApp)", h("input", { id: "t-fone", inputmode: "tel", placeholder: "(47) 99999-0000" })),
-    h("label", { class: "f" }, "Código pessoal", h("input", { id: "t-cod", required: true, inputmode: "numeric", value: novoCodigo(), maxlength: "8" })),
+    h("label", { class: "f" }, "Senha de acesso (gerada)", h("input", { id: "t-cod", required: true, inputmode: "numeric", value: novoCodigo(), maxlength: "8" })),
     h("div", { class: "row", style: "align-items:flex-end" }, h("button", { class: "btn", type: "submit" }, "Cadastrar técnico"), msg));
   const linhas = tecnicos().map(t => { const n = Object.values(D.obras).filter(o => o.tecnico === t.nome && !encerrada(o)).length;
-    const txt = `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nCódigo pessoal: ${t.codigo}\nNão compartilhe este código.`;
+    const txt = `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nSenha de acesso: ${t.codigo}\nNão compartilhe esta senha.`;
     return h("tr", { style: t.ativo === false ? "opacity:.55" : "" }, h("td", {}, h("b", { text: t.nome })), h("td", { text: t.telefone || "" }),
       h("td", { class: "n" }, h("span", { class: "code", text: t.codigo })), h("td", { class: "n", text: n }),
       h("td", {}, h("div", { class: "row" },
         h("a", { class: "btn wa", style: "padding:7px 10px;font-size:12px", href: "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(txt), target: "_blank", rel: "noopener" }, "Enviar acesso"),
-        h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarTecnico({ ...t, codigo: novoCodigo(), nomeAntigo: t.nome }, "Novo código gerado. Envie para o técnico.") }, "Gerar novo código"),
+        h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarTecnico({ ...t, codigo: novoCodigo(), nomeAntigo: t.nome }, "Nova senha gerada. Envie para o técnico.") }, "Gerar nova senha"),
         h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarTecnico({ ...t, ativo: t.ativo === false, nomeAntigo: t.nome }, t.ativo === false ? "Técnico reativado" : "Técnico desativado") }, t.ativo === false ? "Reativar" : "Desativar")))); });
   return h("div", { style: "display:flex;flex-direction:column;gap:12px" },
-    h("p", { class: "meta", style: "margin:0", text: "Cada técnico entra no app de campo com o código pessoal dele e só vê as obras em que é o responsável. Um técnico desativado perde o acesso." }),
+    h("p", { class: "meta", style: "margin:0", text: "Cada técnico entra no app de campo com a senha dele e só vê as obras em que é o responsável. Também dá para cadastrar o responsável direto no cadastro da obra. Um técnico desativado perde o acesso." }),
     form,
-    linhas.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Técnico", "Telefone", "Código", "Obras ativas", ""].map((t, i) => h("th", { class: i === 2 || i === 3 ? "n" : "", text: t })))), h("tbody", {}, linhas)))
+    linhas.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Técnico", "Telefone", "Senha", "Obras ativas", ""].map((t, i) => h("th", { class: i === 2 || i === 3 ? "n" : "", text: t })))), h("tbody", {}, linhas)))
       : h("p", { class: "vazio", text: "Nenhum técnico cadastrado ainda." })); }
+
+function blocoResponsavel(v) {
+  const ativos = tecnicos().filter(t => t.ativo !== false || t.nome === v.tecnico);
+  const novo = !ativos.length;
+  const caixa = h("div", { class: "full card", id: "novo-resp", style: "display:" + (novo ? "grid" : "none") + ";grid-template-columns:1fr 1fr;gap:10px;background:var(--surface2)" },
+    h("div", { style: "grid-column:1/-1;font-weight:700", text: "Novo responsável de campo" }),
+    h("label", { class: "f" }, "Nome do responsável", h("input", { id: "o-novoNome", name: "novoNome", autocomplete: "off" })),
+    h("label", { class: "f" }, "Telefone (WhatsApp)", h("input", { id: "o-novoFone", name: "novoFone", inputmode: "tel", placeholder: "(47) 99999-0000" })),
+    h("label", { class: "f" }, "Senha de acesso (gerada)", h("input", { id: "o-novaSenha", name: "novaSenha", inputmode: "numeric", maxlength: "8", value: novoCodigo() })),
+    h("p", { class: "meta", style: "margin:0;align-self:end", text: "O técnico usa esta senha para entrar no app e abrir as obras vinculadas a ele." }));
+  const sel = h("select", { id: "o-tecnico", name: "tecnico", required: true, onchange: e => { $("#novo-resp").style.display = e.target.value === "__novo" ? "grid" : "none"; } },
+    h("option", { value: "" }, "Escolha o responsável"),
+    ativos.map(t => h("option", { value: t.nome, selected: t.nome === v.tecnico || null }, t.nome)),
+    h("option", { value: "__novo", selected: novo || null }, "+ Cadastrar novo responsável"));
+  return h("div", { class: "full", style: "display:flex;flex-direction:column;gap:10px" },
+    h("label", { class: "f" }, "Responsável de campo (preenche o checklist)", sel), caixa); }
 
 /* ---------- link da obra para o técnico responsável ---------- */
 const b64u = b => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -359,7 +383,7 @@ async function linkObra(o) {
   const pac = { t: t.nome, ...(await fecharPacote(dados, t.codigo)) };
   const url = APP_CAMPO + "#o=" + b64u(new TextEncoder().encode(JSON.stringify(pac)));
   cacheLink[o.id] = { k: chave, url }; return url; }
-const textoLink = o => `Checklist de pré-instalação: ${o.id} ${o.nome || ""}\nObra liberada para ${o.tecnico}. Abra o link e entre com o seu código pessoal:`;
+const textoLink = o => { const t = tecnicoDe(o.tecnico); return `Olá, ${o.tecnico}! A obra ${o.id} ${o.nome || ""} foi liberada para você preencher o checklist de pré-instalação.\nSua senha de acesso: ${t ? t.codigo : ""}\nAbra o link:`; };
 async function compartilharLink(o) {
   if (!tecnicoDe(o.tecnico)) { toast("Escolha o técnico responsável antes de enviar o link."); UI.form = o.id; render(); return; }
   UI.link = o.id; render(); }
@@ -371,8 +395,9 @@ function blocoLink(o) {
   linkObra(o).then(url => { inp.value = url; wa.href = "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(textoLink(o) + "\n" + url); })
     .catch(() => { inp.value = "Escolha o técnico responsável da obra."; });
   return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px;border-color:var(--teal)" },
-    h("b", { text: "Link da obra para " + (t ? t.nome : "o técnico") }),
-    h("p", { class: "meta", style: "margin:0", text: "O link só abre no app do técnico responsável, com o código pessoal dele. Outra pessoa que receber o link não consegue abrir a obra." }),
+    h("b", { text: "Acesso da obra para " + (t ? t.nome : "o técnico") }),
+    t ? h("div", { class: "row" }, h("span", { class: "meta", text: "Senha de acesso do técnico:" }), h("span", { class: "code", style: "font-size:20px", text: t.codigo })) : null,
+    h("p", { class: "meta", style: "margin:0", text: "O técnico abre o link e entra com a senha dele. O link só abre para o responsável vinculado à obra." }),
     inp, h("div", { class: "row" },
       h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(textoLink(o) + "\n" + inp.value); toast("Link copiado"); } catch (e) { inp.focus(); inp.select(); toast("Selecione e copie o link"); } } }, "Copiar link"), wa)); }
 
