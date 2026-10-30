@@ -193,6 +193,7 @@ function doPost(e) {
       if (b.acao === "supSalvarObra") return json_(salvarObra_(b.obra || {}));
       if (b.acao === "supSalvarTecnico") return json_(salvarTecnico_(b.tecnico || {}));
       if (b.acao === "supSalvarItens") return json_(salvarListaItens_(b.itens || []));
+      if (b.acao === "supSalvarRespostas") return json_(salvarItens_(b.mudancas || [], "Supervisor", null));
     } finally { lk.releaseLock(); }
     return json_({ ok: false, erro: "ação desconhecida" });
   }
@@ -285,10 +286,16 @@ function salvarItens_(mudancas, autor, minhas) {
   atuais.forEach(r => porChave[r.obra + "|" + r.cod] = r);
   const cat = {}; itens_().forEach(i => cat[i.codigo] = i);
   const aceitas = [], ignoradas = [], recusadas = [];
+  const plano = Object.keys(cat).filter(c => cat[c].ativo && norm_(cat[c].categoria) === "PLANEJAMENTO");
+  const planejamentoOk = obra => plano.every(c => { const r = porChave[obra + "|" + c]; return r && (r.status === "Concluído" || r.status === "Não aplicável"); });
   mudancas.forEach(m => {
     const obra = idObra_(m.obra), cod = String(m.cod || "").trim(); if (!obra || !cod) return;
     const k = obra + "|" + cod;
-    if (!minhas[obra]) { recusadas.push(k); return; }           // obra de outro técnico
+    if (minhas) {                                                  // técnico de campo
+      if (!minhas[obra]) { recusadas.push(k); return; }          // obra de outro técnico
+      if (plano.indexOf(cod) >= 0) { recusadas.push(k); return; } // planejamento é do supervisor
+      if (!planejamentoOk(obra)) { recusadas.push(k); return; }   // campo ainda bloqueado
+    }
     const d = m.dados || {}, velho = porChave[k];
     // vale a alteração mais recente: se o servidor já tem uma mais nova, mantém a dele
     if (velho && velho.em && d.em && new Date(d.em).getTime() < new Date(velho.em).getTime() - 500) { ignoradas.push(k); return; }
@@ -301,7 +308,8 @@ function salvarItens_(mudancas, autor, minhas) {
       pasta: fotos.length ? pastaObra_(obra).getUrl() : "", fotos: fotos.length ? JSON.stringify(fotos) : ""
     };
     if (velho) sh.getRange(velho._linha, 1, 1, COL_REG.length).setValues([linha_(COL_REG, r)]);
-    else { sh.appendRow(linha_(COL_REG, r)); porChave[k] = { _linha: sh.getLastRow(), em: r.em }; }
+    else { sh.appendRow(linha_(COL_REG, r)); porChave[k] = { _linha: sh.getLastRow(), em: r.em, status: r.status }; }
+    if (porChave[k]) porChave[k].status = r.status;
     aceitas.push(k);
   });
   return { ok: true, aceitas: aceitas, ignoradas: ignoradas, recusadas: recusadas };

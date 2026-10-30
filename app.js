@@ -247,16 +247,24 @@ function desenharLista() {
   box.replaceChildren(...lista.map(o => { const r = resumoCampo(o);
     return h("button", { class: "card obra", onclick: () => ir("obra-" + o.id) },
       h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "grow" }),
-        h("span", { class: "pill " + (r.vazio ? "p-warn" : r.nao ? "p-bad" : "p-ok"), text: r.vazio ? r.vazio + " sem resposta" : r.nao ? r.nao + " com Não" : "Tudo Sim" })),
+        planejamento(o).liberada ? h("span", { class: "pill " + (r.vazio ? "p-warn" : r.nao ? "p-bad" : "p-ok"), text: r.vazio ? r.vazio + " sem resposta" : r.nao ? r.nao + " com Não" : "Tudo Sim" })
+          : h("span", { class: "pill p-na", text: "Aguardando planejamento" })),
       h("h3", { text: o.nome || "(sem nome)" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") }),
       h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
       h("div", { class: "row meta" }, h("span", { text: `${r.sim + r.nao} de ${r.total} respondidos · ${r.sim} Sim · ${r.nao} Não` }), h("span", { class: "grow" }),
         o.previsaoMob ? h("span", { text: "Mobilização " + fmt(o.previsaoMob) }) : null)); })); }
 
+/* Planejamento é do supervisor: o campo só é liberado com todo o planejamento Sim ou Não se aplica */
+const semAc = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+const ehPlanejamento = it => semAc(it.categoria) === "planejamento";
+const itensCampo = o => itensAtivos(o).filter(it => !ehPlanejamento(it));
+function planejamento(o) { const its = itensAtivos(o).filter(ehPlanejamento);
+  const ok = its.filter(it => ["Concluído", "Não aplicável"].includes(reg(o, it.codigo).status)).length;
+  return { total: its.length, ok, liberada: ok === its.length }; }
 /* Lista de checagem: Sim = "Concluído", Não = "Pendente" (status da planilha), sem resposta = vazio */
 const resposta = r => r.status === "Concluído" ? "sim" : r.status ? "nao" : "";
 function resumoCampo(o) { let sim = 0, nao = 0, total = 0, mob = 0;
-  for (const it of itensAtivos(o)) { const r = reg(o, it.codigo); if (r.status === "Não aplicável") continue; total++;
+  for (const it of itensCampo(o)) { const r = reg(o, it.codigo); if (r.status === "Não aplicável") continue; total++;
     const v = resposta(r); if (v === "sim") sim++; else { if (v === "nao") nao++; if (it.etapa === "Mobilização") mob++; } }
   return { sim, nao, vazio: total - sim - nao, total, mob, conf: sim, pct: total ? sim / total : 0 }; }
 
@@ -266,7 +274,12 @@ function telaObra(id) {
     UI.sinc ? null : h("p", { text: "Esta obra não está liberada para você, ou ainda não chegou. Confira com o supervisor." }))); return; }
   const r = resumoCampo(o);
   topo(o.nome || o.id, o.id, "");
-  const its = itensAtivos(o).filter(i => reg(o, i.codigo).status !== "Não aplicável"), cats = [...new Set(its.map(i => i.categoria))];
+  const pl = planejamento(o);
+  if (!pl.liberada) { $("#main").replaceChildren(h("div", { class: "card vazio" }, h("h2", { text: "Aguardando o planejamento do supervisor" }),
+      h("p", { text: `O supervisor já concluiu ${pl.ok} de ${pl.total} itens de planejamento. Quando ele terminar, o checklist desta obra é liberado aqui.` }),
+      CENTRAL.url ? h("button", { class: "btn sec", style: "margin:8px auto 0", onclick: () => sincronizar() }, "Verificar de novo") : h("p", { class: "meta", text: "Peça ao supervisor o link atualizado depois que ele concluir o planejamento." })));
+    return; }
+  const its = itensCampo(o).filter(i => reg(o, i.codigo).status !== "Não aplicável"), cats = [...new Set(its.map(i => i.categoria))];
   const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
     h("div", { class: "meta", text: [o.cliente, o.cidade, o.modelo].filter(Boolean).join(" · ") }),
     o.previsaoMob || o.respEctas ? h("div", { class: "meta", text: [o.previsaoMob ? "Mobilização prevista " + fmt(o.previsaoMob) : "", o.respEctas ? "Responsável ECTAS: " + o.respEctas : ""].filter(Boolean).join(" · ") }) : null,

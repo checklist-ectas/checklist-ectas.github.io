@@ -132,6 +132,7 @@ function kpis() {
   return h("div", { class: "kpis" },
     c(lista.length, "Obras ativas"), c(rs.filter(r => r.lib.t === "NÃO LIBERADA").length, "Não liberadas", "bad"),
     c(rs.filter(r => r.lib.t === "LIBERADA").length, "Liberadas, aguardando", "ok"), c(rs.filter(r => r.lib.t === "MOBILIZADA").length, "Mobilizadas", "mob"),
+    c(lista.filter(o => !planejamento(o).liberada).length, "Aguardando planejamento", "warn"),
     c(rs.reduce((a, r) => a + r.atras, 0), "Itens atrasados", "warn"),
     c(lista.filter(o => !o.dataRealMob && o.previsaoMob && dias(o.previsaoMob, hoje()) >= 0 && dias(o.previsaoMob, hoje()) <= 7 && resumo(o).pendMob > 0).length, "Mobilizam em 7 dias com pendência", "bad")); }
 
@@ -151,6 +152,7 @@ function telaObras() {
       h("td", {}, h("span", { class: "code", text: o.id })), h("td", {}, h("b", { text: o.nome || "" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") })),
       h("td", {}, o.tecnico ? o.tecnico : h("span", { class: "pill p-bad", text: "sem técnico" })), h("td", { class: "n", text: o.dataRealMob ? "✓ " + fmt(o.dataRealMob) : fmt(o.previsaoMob) }),
       h("td", { class: "n", text: falta == null ? "" : (falta >= 0 ? falta + "d" : (-falta) + "d atrás"), style: falta != null && falta <= 7 && r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
+      (() => { const pl = planejamento(o); return h("td", {}, h("span", { class: "pill " + (pl.liberada ? "p-ok" : "p-warn"), text: pl.liberada ? "Liberado ao campo" : `Planej. ${pl.ok}/${pl.total}` })); })(),
       h("td", { class: "n" }, pct(r.pct), h("span", { class: "mini" }, h("i", { style: "width:" + pct(r.pct) }))),
       h("td", { class: "n", text: r.pendMob, style: r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
       h("td", { class: "n", text: r.atras, style: r.atras ? "color:var(--warn);font-weight:700" : "" }),
@@ -160,11 +162,11 @@ function telaObras() {
         oninput: e => { UI.busca = e.target.value; const pos = e.target.selectionStart; render(); const b = $("#busca"); b.focus(); b.setSelectionRange(pos, pos); } }),
       h("div", { class: "chips" }, [["ativas", "Ativas"], ["naolib", "Não liberadas"], ["lib", "Liberadas"], ["mob", "Mobilizadas"], ["atras", "Com atraso"], ["todas", "Todas"]].map(([k, t]) =>
         h("button", { class: "chip", "aria-pressed": String(UI.filtro === k), onclick: () => { UI.filtro = k; render(); } }, t)))),
-    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Técnico (campo)", "Mobilização", "Faltam", "Conferido", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: i >= 3 && i <= 7 ? "n" : "", text: t })))),
+    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Técnico (campo)", "Mobilização", "Faltam", "Planejamento", "Conferido", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: (i >= 3 && i <= 4) || (i >= 6 && i <= 8) ? "n" : "", text: t })))),
       h("tbody", {}, linhas))) : h("p", { class: "vazio", text: "Nenhuma obra neste filtro." })); }
 
 function telaObra(o) {
-  const r = resumo(o); const cats = [...new Set(itensAtivos().map(i => i.categoria))];
+  const r = resumo(o); const cats = [...new Set(itensAtivos().filter(i => !ehPlanejamento(i)).map(i => i.categoria))];
   const info = [["Técnico responsável (campo)", o.tecnico || "não definido"], ["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
     ["Data da verificação", fmt(o.dataVerificacao)], ["Previsão de mobilização", fmt(o.previsaoMob)], ["Mobilização real", fmt(o.dataRealMob)], ["Situação", o.situacao], ["Observações", o.obs]].filter(x => x[1]);
   const corpo = [];
@@ -186,12 +188,14 @@ function telaObra(o) {
       h("button", { class: "btn wa", onclick: () => compartilharLink(o) }, CENTRAL.url ? "Acesso do técnico" : "Link da obra para o técnico"),
       h("button", { class: "btn sec", onclick: () => { UI.form = o.id; render(); scrollTo(0, 0); } }, "Editar dados da obra"),
       o.dataRealMob ? null : h("button", { class: "btn sec", onclick: () => salvarObra({ id: o.id, dataRealMob: hoje(), situacao: "Mobilizada" }, "Mobilização registrada") }, "Registrar mobilização hoje")),
+    blocoPlanejamento(o),
     h("div", { class: "card", style: "display:flex;flex-direction:column;gap:12px" },
       h("div", { class: "row" }, h("span", { class: "code", text: o.id }), h("span", { class: "pill " + r.lib.c, text: r.lib.t })),
       h("h2", { style: "margin:0;font-size:20px", text: o.nome || "" }),
       h("div", { class: "prog" }, h("i", { style: "width:" + pct(r.pct) })),
       h("div", { class: "stats" }, [[pct(r.pct), "Conferido"], [r.conc + "/" + r.apl, "Itens"], [r.pendMob, "P/ mobilizar"], [r.atras, "Atrasados"]].map(([v, t]) => h("div", { class: "stat" }, h("b", { text: v }), h("span", { text: t })))),
       h("dl", { class: "det" }, info.map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v }))))),
+    h("b", { text: planejamento(o).liberada ? "Checklist do campo" : "Checklist do campo (bloqueado até concluir o planejamento)" }),
     h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Cód.", "Item", "Status", "Responsável", "Prazo", "Conclusão", "Observações / evidências"].map((t, i) => h("th", { class: i === 4 || i === 5 ? "n" : "", text: t })))), h("tbody", {}, corpo)))); }
 
 const cacheFoto = {};
@@ -255,6 +259,40 @@ async function salvarObra(d, aviso) {
 
 // lista de itens usada antes de importar o primeiro Excel (a mesma do app de campo)
 function ITENS_BASE() { return (window.ITENS_CAMPO || []).map(r => ({ codigo: r[0], categoria: r[1], item: r[2], etapa: r[3], referencia: r[4], ativo: true })); }
+
+/* ---------- planejamento: preenchido pelo supervisor ---------- */
+const semAc = t => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+const ehPlanejamento = it => semAc(it.categoria) === "planejamento";
+const itensPlanejamento = () => itensAtivos().filter(ehPlanejamento);
+const PLAN_OK = ["Concluído", "Não aplicável"];
+function planejamento(o) { const its = itensPlanejamento(); const ok = its.filter(it => PLAN_OK.includes(reg(o, it.codigo).status)).length;
+  return { total: its.length, ok, liberada: ok === its.length }; }   // liberada ao campo só com todo o planejamento Sim ou Não se aplica
+async function salvarResposta(o, cod, patch) {
+  const dados = { ...reg(o, cod), ...patch, em: new Date().toISOString(), por: "Supervisor" };
+  for (const k of Object.keys(dados)) if (dados[k] === undefined) delete dados[k];
+  const antes = planejamento(o).liberada;
+  o.checklist = { ...(o.checklist || {}), [cod]: dados }; D.obras[o.id] = o; gravar("sup-dados", D);
+  const agora = planejamento(o).liberada;
+  if (agora && !antes) toast("Planejamento completo: checklist liberado para " + (o.tecnico || "o técnico") + ".");
+  render();
+  if (CENTRAL.url) { try { await api({ acao: "supSalvarRespostas", mudancas: [{ obra: o.id, cod, dados }] }); }
+    catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : "Sem conexão com a central: a resposta não foi salva. Tente de novo."; render(); } } }
+function blocoPlanejamento(o) {
+  const its = itensPlanejamento(); if (!its.length) return null;
+  const p = planejamento(o);
+  const linha = it => { const g = reg(o, it.codigo), s = g.status || "";
+    const bt = (v, txt, cor) => h("button", { class: "ck-b", style: s === v ? `background:var(--${cor});border-color:var(--${cor});color:#fff` : "", "aria-pressed": String(s === v),
+      onclick: () => salvarResposta(o, it.codigo, s === v ? { status: "", concl: "" } : { status: v, concl: v === "Concluído" ? (g.concl || hoje()) : "" }) }, txt);
+    return h("div", { class: "ck-linha", style: "grid-template-columns:1fr 58px 58px 58px" },
+      h("div", { class: "ck-txt" }, h("span", { class: "ck-item", text: it.item }),
+        h("input", { class: "busca", style: "padding:6px 10px;font-size:13px;margin-top:4px", placeholder: "Observação (opcional)", value: g.obs || "", onchange: e => salvarResposta(o, it.codigo, { obs: e.target.value }) })),
+      bt("Concluído", "Sim", "ok"), bt("Pendente", "Não", "bad"), bt("Não aplicável", "N/A", "na")); };
+  return h("div", { class: "card ck", style: "border-color:" + (p.liberada ? "var(--ok)" : "var(--warn)") },
+    h("div", { class: "row", style: "padding:10px 0" }, h("b", { text: "Planejamento (preenchido pelo supervisor)" }), h("span", { class: "grow" }),
+      h("span", { class: "pill " + (p.liberada ? "p-ok" : "p-warn"), text: p.liberada ? "Checklist liberado para o campo" : `${p.ok} de ${p.total} · campo bloqueado` })),
+    h("p", { class: "meta", style: "margin:0 0 6px", text: "Quando todos os itens estiverem Sim ou N/A (não se aplica), o restante da lista é liberado para o técnico de campo." }),
+    h("div", { class: "ck-cab", style: "grid-template-columns:1fr 58px 58px 58px" }, h("span", { class: "ck-cat", text: "Item" }), h("span", { text: "Sim" }), h("span", { text: "Não" }), h("span", { text: "N/A" })),
+    its.map(linha)); }
 
 /* ---------- itens do checklist (carregados da planilha) ---------- */
 const ETAPAS = ["Mobilização", "Montagem", "Testes", "Start-up"];
@@ -378,6 +416,7 @@ async function linkObra(o) {
   const campos = ["id", "nome", "cliente", "cidade", "modelo", "respEctas", "contato", "telefone", "dataVerificacao", "previsaoMob", "situacao", "obs", "tecnico"];
   const dados = {}; for (const k of campos) if (o[k]) dados[k] = o[k];
   dados.itens = itensAtivos().map(i => [i.codigo, i.categoria, i.item, i.etapa, i.referencia || ""]);   // lista de checagem da planilha
+  dados.checklist = {}; for (const it of itensPlanejamento()) { const g = reg(o, it.codigo); if (g.status) dados.checklist[it.codigo] = { status: g.status, obs: g.obs || "", em: g.em, por: "Supervisor" }; }
   const chave = JSON.stringify(dados) + "|" + t.codigo;
   if (cacheLink[o.id] && cacheLink[o.id].k === chave) return cacheLink[o.id].url;
   const pac = { t: t.nome, ...(await fecharPacote(dados, t.codigo)) };
