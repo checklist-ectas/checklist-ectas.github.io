@@ -18,7 +18,7 @@ let C = ler("ck-config", { codigo: "", autor: "" });
 let LK = ler("ck-obras-link", {});                                                      // obras recebidas por link do supervisor
 const salvarLK = () => gravar("ck-obras-link", LK);
 const salvarE = () => gravar("ck-estado", E), salvarP = () => gravar("ck-pend", P), salvarC = () => gravar("ck-config", C);
-const UI = { rota: { v: "lista" }, filtro: "ativas", busca: "", filtroItens: "todos", abertos: new Set(), sinc: false, sincMsg: "", sincErro: false, instalar: null };
+const UI = { abrirUnica: true, rota: { v: "lista" }, filtro: "ativas", busca: "", filtroItens: "todos", abertos: new Set(), sinc: false, sincMsg: "", sincErro: false, instalar: null };
 
 /* ---------- fotos (IndexedDB) ---------- */
 let dbp = null;
@@ -123,6 +123,7 @@ async function sincronizar() {
     const obras = {}; for (const o of r.obras || []) obras[o.id] = o;
     E = { obras, itens: (r.itens && r.itens.length) ? r.itens : E.itens, ultimaSync: new Date().toISOString(), planilha: r.planilha || "" }; salvarE();
     setSync("Sincronizado às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
+    abrirObraUnica();
   } catch (e) {
     if (e.codigo) { C.codigo = ""; salvarC(); setSync("Senha incorreta. Entre de novo.", true); }
     else setSync("Sem conexão com a central. As alterações ficam no celular.", true);
@@ -180,7 +181,7 @@ function telaEntrada() {
       else if (!nome) { msg.textContent = "Digite o seu nome."; return; }
       if (C.codigo !== cod) { E = { obras: {}, itens: E.itens, ultimaSync: null, planilha: "" }; salvarE(); }
       const destino = UI.rota.v === "obra" ? "obra-" + UI.rota.id : "";   // link de obra aberto antes de entrar
-      C = { codigo: cod, autor }; salvarC(); ir(destino); processarLink(); sincronizar(); } },
+      C = { codigo: cod, autor }; salvarC(); UI.abrirUnica = !destino; ir(destino); processarLink(); sincronizar(); } },
     h("h2", { text: "Acesso do técnico" }),
     h("p", { class: "meta", text: "Digite a senha de acesso que o supervisor enviou para você. Você vai ver só as obras liberadas para você." }),
     CENTRAL.url ? null : h("label", { class: "f" }, "Seu nome", h("input", { id: "e-nome", required: true, autocomplete: "name", value: C.autor || "" })),
@@ -221,7 +222,14 @@ function telaBloqueada(tecnico) {
   $("#main").replaceChildren(h("div", { class: "card vazio" }, h("h2", { text: "Esta obra não está liberada para você" }),
     h("p", { text: tecnico ? `Ela foi liberada para ${tecnico}. Se a obra deveria ser sua, peça ao supervisor para trocar o técnico responsável.` : "Peça ao supervisor para liberar a obra para você." }))); }
 
+// Ao entrar, se o técnico tem uma só obra liberada, o checklist dela abre direto.
+function obrasAtivas() { return idsObras().map(obraView).filter(o => o && !["Instalação concluída", "Cancelada"].includes(o.situacao)); }
+function abrirObraUnica() {
+  if (!UI.abrirUnica || !C.codigo || UI.rota.v !== "lista") return;
+  const at = obrasAtivas(); if (!at.length) return;
+  UI.abrirUnica = false; if (at.length === 1) ir("obra-" + at[0].id); }
 function telaLista() {
+  if (UI.abrirUnica && obrasAtivas().length === 1) { abrirObraUnica(); return; }
   topo("Checklist de Pré-Instalação", (C.autor ? C.autor + " · " : "") + "Minhas obras", null, [h("button", { onclick: () => ir("config") }, "Mais")]);
   const kids = [avisoInstalar(),
     idsObras().length > 3 ? h("input", { class: "busca", id: "busca", type: "search", placeholder: "Buscar obra, cliente ou cidade", value: UI.busca, oninput: e => { UI.busca = e.target.value; desenharLista(); } }) : null,
@@ -232,7 +240,7 @@ function desenharLista() {
   const q = UI.busca.trim().toLowerCase();
   const todas = idsObras().map(obraView).filter(o => o && !["Instalação concluída", "Cancelada"].includes(o.situacao));
   if (!todas.length) { box.replaceChildren(h("div", { class: "vazio" }, h("h2", { text: "Nenhuma obra para conferir" }),
-    h("p", { text: CENTRAL.url ? (E.ultimaSync ? "As obras são cadastradas pelo supervisor e aparecem aqui sozinhas." : "Conecte-se à internet para receber as obras cadastradas pelo supervisor.")
+    h("p", { text: CENTRAL.url ? (E.ultimaSync ? "Nenhuma obra liberada para você no momento. Quando o supervisor vincular uma obra a você, ela aparece aqui." : "Conecte-se à internet para receber as obras cadastradas pelo supervisor.")
       : "As obras são cadastradas pelo supervisor. Toque no link da obra que ele enviar pelo WhatsApp e ela aparece aqui." }))); return; }
   const lista = todas.filter(o => !q || [o.id, o.nome, o.cliente, o.cidade].join(" ").toLowerCase().includes(q))
     .sort((a, b) => (a.previsaoMob || "9999").localeCompare(b.previsaoMob || "9999"));

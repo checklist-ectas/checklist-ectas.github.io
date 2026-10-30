@@ -183,7 +183,7 @@ function telaObra(o) {
     h("button", { class: "more", style: "align-self:flex-start", onclick: () => { UI.obra = null; UI.link = null; render(); } }, "‹ Voltar para as obras"),
     blocoLink(o),
     h("div", { class: "row" },
-      h("button", { class: "btn wa", onclick: () => compartilharLink(o) }, "Link da obra para o técnico"),
+      h("button", { class: "btn wa", onclick: () => compartilharLink(o) }, CENTRAL.url ? "Acesso do técnico" : "Link da obra para o técnico"),
       h("button", { class: "btn sec", onclick: () => { UI.form = o.id; render(); scrollTo(0, 0); } }, "Editar dados da obra"),
       o.dataRealMob ? null : h("button", { class: "btn sec", onclick: () => salvarObra({ id: o.id, dataRealMob: hoje(), situacao: "Mobilizada" }, "Mobilização registrada") }, "Registrar mobilização hoje")),
     h("div", { class: "card", style: "display:flex;flex-direction:column;gap:12px" },
@@ -390,6 +390,13 @@ async function compartilharLink(o) {
 function blocoLink(o) {
   if (UI.link !== o.id) return null;
   const t = tecnicoDe(o.tecnico);
+  if (CENTRAL.url) {   // com a central, a obra aparece sozinha para o técnico ao entrar com a senha
+    const txt = t ? `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nSenha de acesso: ${t.codigo}\nAo entrar, as obras liberadas para você já aparecem.` : "";
+    return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px;border-color:var(--teal)" },
+      h("b", { text: "Obra liberada para " + (t ? t.nome : "o técnico") }),
+      h("p", { class: "meta", style: "margin:0", text: "Não precisa enviar link: quando o técnico entrar no app com a senha dele, o checklist desta obra já aparece." }),
+      t ? h("div", { class: "row" }, h("span", { class: "meta", text: "Endereço do app: " + APP_CAMPO + " · Senha de acesso:" }), h("span", { class: "code", style: "font-size:20px", text: t.codigo })) : null,
+      t ? h("a", { class: "btn sec", style: "align-self:flex-start", href: "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(txt), target: "_blank", rel: "noopener" }, "Enviar a senha ao técnico (só no primeiro acesso)") : null); }
   const inp = h("input", { class: "busca", id: "link-obra", readonly: true, value: "Gerando o link…", onfocus: e => e.target.select() });
   const wa = h("a", { class: "btn wa", target: "_blank", rel: "noopener" }, "Enviar no WhatsApp para " + (t ? t.nome : ""));
   linkObra(o).then(url => { inp.value = url; wa.href = "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(textoLink(o) + "\n" + url); })
