@@ -8,7 +8,7 @@
 <meta name="robots" content="noindex">
 <link rel="icon" href="../icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="../style.css?v=6">
+<link rel="stylesheet" href="../style.css?v=8">
 <style>
 .wrap{max-width:1180px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
@@ -50,6 +50,14 @@ svg text{fill:var(--muted);font-family:var(--font);font-size:11px}
 .pl-rodape{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:14px 0 6px}
 .pl-rodape.ok b{color:var(--ok)}
 @media (max-width:760px){.pl-linha{grid-template-columns:1fr 1fr}.pl-linha .ck-txt,.pl-linha .pl-bts{grid-column:1/-1}}
+.rev-box{display:flex;flex-direction:column;gap:0;padding:10px 12px;border-radius:10px;background:var(--surface2)}
+.rev-box.ok{background:var(--ok-bg)}
+.rev-linha{display:grid;grid-template-columns:1fr 230px;gap:12px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.rev-linha:last-child{border-bottom:none}
+.rev-ctl{display:flex;flex-direction:column;gap:6px}
+.rev-bts{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.rev-b{height:40px;font-size:13px}
+@media (max-width:640px){.rev-linha{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -64,7 +72,8 @@ svg text{fill:var(--muted);font-family:var(--font);font-size:11px}
 <main><div class="wrap" id="main" style="padding-block:18px 60px;display:flex;flex-direction:column;gap:16px"><p class="vazio">Carregando…</p></div></main>
 <script src="../config.js?v=2"></script>
 <script src="../lib/xlsx.full.min.js"></script>
+<script src="../lib/jspdf.umd.min.js"></script>
 <script src="itens.js?v=1"></script>
-<script src="painel.js?v=11"></script>
+<script src="painel.js?v=13"></script>
 </body>
 </html>

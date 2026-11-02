@@ -11,16 +11,21 @@
  *    as obras em que ele é o responsável.
  *
  * COMO INSTALAR (uma vez):
- *  1. Troque a SENHA_SUPERVISOR abaixo.
+ *  1. Troque a SENHA_SUPERVISOR abaixo (senha inicial; depois troque pelo painel).
  *  2. Rode a função configurar() pelo editor e autorize o acesso.
  *  3. Implantar > Nova implantação > Tipo: App da Web
  *     Executar como: Eu  |  Quem pode acessar: Qualquer pessoa
  *  4. Copie o URL do app da Web e cole no arquivo config.js do repositório.
+ *  5. Para os avisos por e-mail: Executar > instalarAvisos (uma vez) e autorize.
  *
  * Para mudar a lista padrão de itens, edite a aba ITENS da planilha
  * (coluna Ativo = Não tira o item do app sem apagar o que já foi preenchido).
  */
-const SENHA_SUPERVISOR = "supervisor-ectas";      // TROQUE: senha do painel do supervisor
+// Senha inicial do administrador. No primeiro acesso ela passa para as Propriedades do script
+// (fora do código) e depois é trocada pelo painel, em Acesso > Minha senha.
+const SENHA_SUPERVISOR = "supervisor-ectas";
+const APP_SUPERVISOR = "https://checklist-ectas.github.io/supervisor";
+const APP_CAMPO = "https://checklist-ectas.github.io/campo";
 const NOME_PLANILHA = "Checklist de Pré-Instalação ECTAS - Base";
 const PASTA_FOTOS = "Checklist de Pré-Instalação ECTAS - Fotos";
 const TZ = "America/Sao_Paulo";
@@ -32,18 +37,21 @@ const COL_OBRAS = [
   ["previsaoMob", "Previsão de mobilização"], ["dataRealMob", "Data real de mobilização"], ["situacao", "Situação da obra"],
   ["obs", "Observações gerais"], ["em", "Atualizado em"], ["por", "Atualizado por"], ["liberadoCampo", "Autorizado ao campo em"],
   ["enviadoCampo", "Checklist enviado pelo técnico em"], ["enviadoPor", "Enviado por"],
-  ["analise", "Análise do supervisor"], ["analiseEm", "Analisado em"], ["analiseObs", "Comentário da análise"]
+  ["analise", "Análise do supervisor"], ["analiseEm", "Analisado em"], ["analiseObs", "Comentário da análise"],
+  ["liberadoPor", "Autorizado por"], ["analisePor", "Analisado por"]
 ];
 const COL_REG = [
   ["obra", "ID Obra"], ["cod", "Código item"], ["categoria", "Categoria"], ["item", "Item de verificação"],
   ["etapa", "Etapa limite"], ["status", "Status"], ["parte", "Parte responsável"], ["resp", "Responsável (nome)"],
   ["prev", "Data prevista"], ["concl", "Data conclusão"], ["link", "Evidência (link foto/doc)"],
   ["obs", "Observações / Pendências"], ["em", "Última atualização"], ["por", "Atualizado por"],
-  ["pasta", "Pasta das fotos"], ["fotos", "Fotos (ids)"]
+  ["pasta", "Pasta das fotos"], ["fotos", "Fotos (ids)"],
+  ["rev", "Análise do item (corrigir / corrigido / aceito)"], ["revObs", "Comentário do supervisor no item"]
 ];
 const COL_ITENS = [["codigo", "Código"], ["categoria", "Categoria"], ["item", "Item de verificação"],
   ["etapa", "Etapa limite"], ["referencia", "Referência"], ["ativo", "Ativo (Sim/Não)"]];
-const COL_TEC = [["nome", "Nome do técnico"], ["codigo", "Código pessoal"], ["telefone", "Telefone (WhatsApp)"], ["ativo", "Ativo (Sim/Não)"]];
+const COL_TEC = [["nome", "Nome do técnico"], ["codigo", "Código pessoal"], ["telefone", "Telefone (WhatsApp)"], ["ativo", "Ativo (Sim/Não)"], ["email", "E-mail"]];
+const COL_SUP = [["nome", "Nome do supervisor"], ["email", "E-mail"], ["sal", "Sal"], ["hash", "Senha (código, não é a senha)"], ["ativo", "Ativo (Sim/Não)"], ["admin", "Administrador (Sim/Não)"]];
 const DATAS = ["dataVerificacao", "previsaoMob", "dataRealMob", "prev", "concl"];
 const CARIMBO = ["em", "liberadoCampo", "enviadoCampo", "analiseEm"];
 
@@ -91,7 +99,13 @@ const ITENS_PADRAO = [
 
 /* ---------------- utilidades ---------------- */
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
-function senha_() { return PropertiesService.getScriptProperties().getProperty("SENHA_SUPERVISOR") || SENHA_SUPERVISOR; }
+function senha_() {   // senha do administrador: fica nas Propriedades do script, não no código
+  const pr = PropertiesService.getScriptProperties(); let s = pr.getProperty("SENHA_SUPERVISOR");
+  if (!s && SENHA_SUPERVISOR) { pr.setProperty("SENHA_SUPERVISOR", SENHA_SUPERVISOR); s = SENHA_SUPERVISOR; }
+  return s || "";
+}
+function hash_(senha, sal) { return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, sal + "|" + senha, Utilities.Charset.UTF_8)); }
+const sim_ = v => /^sim$/i.test(String(v == null ? "" : v).trim());
 function limpa_(s, max) { return String(s == null ? "" : s).slice(0, max || 3000); }
 function idObra_(s) { return String(s || "").trim().toUpperCase().replace(/\s+/g, "-").replace(/[^A-Z0-9\-]/g, ""); }
 function norm_(s) { return String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").trim().replace(/\s+/g, " ").toUpperCase(); }
@@ -129,6 +143,7 @@ function aba_(nome, cols) {
 const abaObras_ = () => aba_("OBRAS", COL_OBRAS);
 const abaReg_ = () => aba_("REGISTRO", COL_REG);
 const abaTec_ = () => aba_("TECNICOS", COL_TEC);
+const abaSup_ = () => aba_("SUPERVISORES", COL_SUP);
 function abaItens_() {
   const sh = aba_("ITENS", COL_ITENS);
   if (sh.getLastRow() < 2) {
@@ -162,7 +177,7 @@ function linha_(cols, o) { return cols.map(c => valor_(c[0], o[c[0]])); }
 
 /* ---------------- técnicos ---------------- */
 function tecnicos_() {
-  return ler_(abaTec_(), COL_TEC).filter(t => t.nome).map(t => ({ nome: String(t.nome).trim(), codigo: String(t.codigo).trim(), telefone: t.telefone, ativo: ativo_(t.ativo) }));
+  return ler_(abaTec_(), COL_TEC).filter(t => t.nome).map(t => ({ nome: String(t.nome).trim(), codigo: String(t.codigo).trim(), telefone: t.telefone, email: t.email || "", ativo: ativo_(t.ativo) }));
 }
 function tecnicoPorCodigo_(cod) {
   cod = String(cod || "").trim(); if (!cod) return null;
@@ -184,18 +199,25 @@ function doPost(e) {
   let b;
   try { b = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, erro: "formato inválido" }); }
 
-  // Painel do supervisor: protegido pela senha do supervisor
+  // Painel do supervisor: cada supervisor entra com o próprio usuário e senha
   if (String(b.acao || "").indexOf("sup") === 0) {
-    if (String(b.senha || "") !== senha_()) return json_({ ok: false, erro: "senha" });
-    if (b.acao === "supPing") return json_({ ok: true });
+    const sup = supervisor_(b);
+    if (!sup) return json_({ ok: false, erro: "senha" });
+    if (b.acao === "supPing") return json_({ ok: true, nome: sup.nome, admin: sup.admin });
     if (b.acao === "supFoto") return json_(verFoto_(b.id, null));
-    if (b.acao === "supCarregar") return json_(carregar_(null));
+    if (b.acao === "supCarregar") return json_(carregar_(null, sup));
     const lk = LockService.getScriptLock(); lk.waitLock(25000);
     try {
-      if (b.acao === "supSalvarObra") return json_(salvarObra_(b.obra || {}));
+      if (b.acao === "supSalvarObra") return json_(salvarObra_(b.obra || {}, sup));
+      if (b.acao === "supExcluirObra") return json_(excluirObra_(b.id));
       if (b.acao === "supSalvarTecnico") return json_(salvarTecnico_(b.tecnico || {}));
+      if (b.acao === "supExcluirTecnico") return json_(excluirTecnico_(b.nome));
       if (b.acao === "supSalvarItens") return json_(salvarListaItens_(b.itens || []));
-      if (b.acao === "supSalvarRespostas") return json_(salvarItens_(b.mudancas || [], "Supervisor", null));
+      if (b.acao === "supSalvarRespostas") return json_(salvarItens_(b.mudancas || [], sup.nome, null));
+      if (b.acao === "supTrocarSenha") return json_(trocarSenha_(sup, b.nova));
+      if (b.acao === "supSalvarSupervisor") return json_(sup.admin ? salvarSupervisor_(b.supervisor || {}) : { ok: false, erro: "Só o administrador cadastra supervisores." });
+      if (b.acao === "supSalvarConfig") return json_(sup.admin ? salvarConfig_(b.config || {}) : { ok: false, erro: "Só o administrador muda os avisos." });
+      if (b.acao === "supTestarEmail") return json_(testarEmail_(sup, b.para));
     } finally { lk.releaseLock(); }
     return json_({ ok: false, erro: "ação desconhecida" });
   }
@@ -226,8 +248,96 @@ function itens_() {
   }));
 }
 
+/* ---------------- supervisores ---------------- */
+// usuário vazio ou "admin" = administrador (senha nas Propriedades do script); senão, e-mail ou nome da aba SUPERVISORES
+function supervisor_(b) {
+  const usuario = String(b.usuario || "").trim(), senha = String(b.senha || "");
+  if (!senha) return null;
+  if (!usuario || ["ADMIN", "ADMINISTRADOR"].indexOf(norm_(usuario)) >= 0) return senha === senha_() ? { nome: "Administrador", email: "", admin: true, mestre: true } : null;
+  const s = ler_(abaSup_(), COL_SUP).filter(x => x.nome && ativo_(x.ativo) && (norm_(x.email) === norm_(usuario) || norm_(x.nome) === norm_(usuario)))[0];
+  if (!s || !s.sal || hash_(senha, s.sal) !== s.hash) return null;
+  return { nome: String(s.nome).trim(), email: String(s.email || "").trim(), admin: sim_(s.admin), _linha: s._linha, sal: s.sal };
+}
+function supervisores_() { return ler_(abaSup_(), COL_SUP).filter(x => x.nome).map(x => ({ nome: String(x.nome).trim(), email: x.email || "", ativo: ativo_(x.ativo), admin: sim_(x.admin) })); }
+function salvarSupervisor_(n) {
+  const nome = String(n.nome || "").trim(), email = String(n.email || "").trim();
+  if (!nome) return { ok: false, erro: "Informe o nome do supervisor." };
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, erro: "E-mail inválido." };
+  const sh = abaSup_(), lista = ler_(sh, COL_SUP);
+  const velho = lista.filter(x => norm_(x.nome) === norm_(n.nomeAntigo || nome))[0];
+  if (lista.some(x => x !== velho && (norm_(x.nome) === norm_(nome) || (email && norm_(x.email) === norm_(email))))) return { ok: false, erro: "Já existe um supervisor com esse nome ou e-mail." };
+  let sal = velho ? velho.sal : "", hash = velho ? velho.hash : "";
+  if (n.senha) { if (String(n.senha).length < 6) return { ok: false, erro: "A senha precisa ter pelo menos 6 caracteres." }; sal = Utilities.getUuid(); hash = hash_(String(n.senha), sal); }
+  if (!hash) return { ok: false, erro: "Defina uma senha para o novo supervisor." };
+  const linha = [nome, email, sal, hash, n.ativo === false ? "Não" : "Sim", n.admin ? "Sim" : "Não"];
+  if (velho) sh.getRange(velho._linha, 1, 1, COL_SUP.length).setValues([linha]); else sh.appendRow(linha);
+  return { ok: true };
+}
+function trocarSenha_(sup, nova) {
+  nova = String(nova || "");
+  if (nova.length < 6) return { ok: false, erro: "A nova senha precisa ter pelo menos 6 caracteres." };
+  if (sup.mestre) { PropertiesService.getScriptProperties().setProperty("SENHA_SUPERVISOR", nova); return { ok: true }; }
+  const sal = Utilities.getUuid(), sh = abaSup_();
+  sh.getRange(sup._linha, 3, 1, 2).setValues([[sal, hash_(nova, sal)]]);
+  return { ok: true };
+}
+function salvarConfig_(c) {
+  const lista = String(c.avisoEmails || "").split(/[,;\s]+/).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+  PropertiesService.getScriptProperties().setProperty("AVISO_EMAILS", lista.join(", "));
+  return { ok: true, avisoEmails: lista.join(", ") };
+}
+
+/* ---------------- avisos por e-mail ---------------- */
+function emailsSupervisores_() {
+  const l = String(PropertiesService.getScriptProperties().getProperty("AVISO_EMAILS") || "").split(/[,;\s]+/);
+  supervisores_().forEach(s => { if (s.ativo && s.email) l.push(s.email); });
+  return l.filter((x, i) => x && l.indexOf(x) === i).join(",");
+}
+function email_(para, assunto, linhas, link) {
+  if (!para) return false;
+  const html = '<div style="font-family:Arial,sans-serif;font-size:14px;color:#1D1D1B">' +
+    '<div style="background:#002B49;color:#fff;padding:12px 16px;font-weight:bold">Checklist de Pré-Instalação ECTAS</div>' +
+    '<div style="height:4px;background:linear-gradient(90deg,#66D3CD,#0073A8,#002B49)"></div><div style="padding:16px">' +
+    linhas.map(l => "<p style=\"margin:0 0 10px\">" + l + "</p>").join("") +
+    (link ? '<p><a href="' + link + '" style="display:inline-block;background:#0073A8;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold">Abrir</a></p>' : "") +
+    '</div></div>';
+  try { MailApp.sendEmail({ to: para, subject: assunto, htmlBody: html, name: "Checklist ECTAS" }); return true; }
+  catch (e) { Logger.log("E-mail não enviado (" + assunto + "): " + e); return false; }
+}
+const esc_ = t => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const nomeObra_ = o => "<b>" + esc_(o.id) + "</b> " + esc_(o.nome || "");
+function emailTecnico_(nome) { const t = tecnicos_().filter(x => norm_(x.nome) === norm_(nome))[0]; return t && t.ativo ? t.email : ""; }
+function testarEmail_(sup, para) {
+  para = String(para || sup.email || "").trim(); if (!para) return { ok: false, erro: "Informe um e-mail." };
+  const ok = email_(para, "Teste de aviso · Checklist ECTAS", ["Este é um e-mail de teste do Checklist de Pré-Instalação ECTAS.", "Se você recebeu, os avisos por e-mail estão funcionando."], APP_SUPERVISOR);
+  return ok ? { ok: true } : { ok: false, erro: "O e-mail não saiu. O dono da central precisa rodar a função instalarAvisos no editor do Apps Script e autorizar o envio de e-mails." };
+}
+// Gatilho diário (instalado por instalarAvisos): obras perto da mobilização sem checklist aprovado e pendências vencidas.
+function avisoDiario() {
+  const hoje = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd"), em7 = Utilities.formatDate(new Date(Date.now() + 7 * 864e5), TZ, "yyyy-MM-dd");
+  const obras = ler_(abaObras_(), COL_OBRAS).filter(o => o.id && !o.dataRealMob && ["Instalação concluída", "Cancelada"].indexOf(o.situacao) < 0);
+  const perto = obras.filter(o => o.previsaoMob && o.previsaoMob >= hoje && o.previsaoMob <= em7 && !(o.enviadoCampo && o.analise === "Aprovado"));
+  const ativas = {}; obras.forEach(o => ativas[o.id] = o);
+  const vencidas = ler_(abaReg_(), COL_REG).filter(r => ativas[r.obra] && (r.status === "Pendente" || r.status === "Em andamento") && r.prev && r.prev < hoje);
+  if (!perto.length && !vencidas.length) return;
+  const fmt = d => d ? d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4) : "";
+  const linhas = ["<b>Resumo do dia " + fmt(hoje) + "</b>"];
+  if (perto.length) linhas.push("Mobilizam nos próximos 7 dias sem checklist aprovado:<br>" + perto.map(o => "• " + nomeObra_(o) + " · mobilização " + fmt(o.previsaoMob) + " · " +
+    (!o.liberadoCampo ? "aguardando autorização ao campo" : o.enviadoCampo ? "checklist aguardando análise" : o.analise === "Devolvido" ? "devolvido ao técnico" : "técnico preenchendo") + " (" + esc_(o.tecnico || "sem técnico") + ")").join("<br>"));
+  if (vencidas.length) linhas.push("Pendências com prazo vencido: " + vencidas.length + "<br>" + vencidas.slice(0, 30).map(r => "• " + esc_(r.obra) + " " + esc_(r.cod) + " " + esc_(r.item) + " · " + esc_(r.parte || "sem responsável") + " · prazo " + fmt(r.prev)).join("<br>") + (vencidas.length > 30 ? "<br>…" : ""));
+  email_(emailsSupervisores_(), "Checklist ECTAS · " + (perto.length ? perto.length + " obra(s) mobilizam em até 7 dias" : vencidas.length + " pendência(s) vencida(s)"), linhas, APP_SUPERVISOR);
+}
+/* Rode uma vez pelo editor (Executar > instalarAvisos) e autorize: liga os e-mails e o resumo diário das 7h. */
+function instalarAvisos() {
+  ScriptApp.getProjectTriggers().forEach(t => { if (t.getHandlerFunction() === "avisoDiario") ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger("avisoDiario").timeBased().everyDays(1).atHour(7).inTimezone(TZ).create();
+  const eu = Session.getEffectiveUser().getEmail();
+  email_(eu, "Avisos ligados · Checklist ECTAS", ["Os avisos por e-mail do Checklist de Pré-Instalação estão ligados.", "Todo dia às 7h sai um resumo das obras que mobilizam em até 7 dias e das pendências vencidas."], APP_SUPERVISOR);
+  Logger.log("Avisos instalados. Teste enviado para " + eu);
+}
+
 // tecnico = null: tudo (supervisor). tecnico = nome: só as obras desse técnico.
-function carregar_(tecnico) {
+function carregar_(tecnico, sup) {
   const obras = {};
   ler_(abaObras_(), COL_OBRAS).forEach(o => {
     if (!o.id) return;
@@ -238,21 +348,57 @@ function carregar_(tecnico) {
     const o = obras[r.obra]; if (!o || !r.cod) return;
     let fotos = []; try { fotos = JSON.parse(r.fotos || "[]"); } catch (e) { }
     o.checklist[r.cod] = { status: r.status || "", parte: r.parte, resp: r.resp, prev: r.prev, concl: r.concl,
-      link: r.link, obs: r.obs, em: r.em, por: r.por, fotos: fotos.map(id => "d:" + id) };
+      link: r.link, obs: r.obs, em: r.em, por: r.por, fotos: fotos.map(id => "d:" + id), rev: r.rev || "", revObs: r.revObs || "" };
   });
   const out = { ok: true, itens: itens_(), obras: Object.keys(obras).map(k => obras[k]), agora: new Date().toISOString() };
-  if (tecnico === null) { out.tecnicos = tecnicos_(); out.planilha = planilha_().getUrl(); }
+  if (tecnico === null) {
+    out.tecnicos = tecnicos_(); out.planilha = planilha_().getUrl();
+    if (sup) { out.eu = { nome: sup.nome, admin: sup.admin, mestre: !!sup.mestre };
+      if (sup.admin) { out.supervisores = supervisores_(); out.config = { avisoEmails: PropertiesService.getScriptProperties().getProperty("AVISO_EMAILS") || "" }; } }
+  }
   return out;
 }
 
-function salvarObra_(n) {
+function salvarObra_(n, sup) {
   const sh = abaObras_();
   const id = idObra_(n.id); if (!id) return { ok: false, erro: "Obra sem ID." };
-  const velho = ler_(sh, COL_OBRAS).filter(o => o.id === id)[0];
-  const o = Object.assign({}, velho || {}, n, { id: id, por: "Supervisor", em: new Date().toISOString() });
-  if (velho) sh.getRange(velho._linha, 1, 1, COL_OBRAS.length).setValues([linha_(COL_OBRAS, o)]);
+  const velho = ler_(sh, COL_OBRAS).filter(o => o.id === id)[0] || {};
+  const quem = sup ? sup.nome : "Supervisor";
+  const o = Object.assign({}, velho, n, { id: id, por: quem, em: new Date().toISOString() });
+  delete o.liberadoPor; delete o.analisePor; o.liberadoPor = velho.liberadoPor || ""; o.analisePor = velho.analisePor || "";
+  const autorizou = n.liberadoCampo && !velho.liberadoCampo, decidiu = n.analise !== undefined && n.analise !== (velho.analise || "");
+  if (n.liberadoCampo !== undefined) o.liberadoPor = n.liberadoCampo ? (autorizou ? quem : o.liberadoPor) : "";
+  if (decidiu) o.analisePor = n.analise ? quem : "";
+  if (velho._linha) sh.getRange(velho._linha, 1, 1, COL_OBRAS.length).setValues([linha_(COL_OBRAS, o)]);
   else sh.appendRow(linha_(COL_OBRAS, o));
+  if (decidiu && n.analise) limparCorrigidos_(id);   // nova análise: "corrigido" da rodada anterior deixa de valer
+  // avisos ao técnico
+  const para = emailTecnico_(o.tecnico);
+  if (autorizou) email_(para, "Obra liberada para o checklist: " + id, ["Olá, " + esc_(o.tecnico) + "!", "A obra " + nomeObra_(o) + " foi liberada para você preencher o checklist de pré-instalação.", "Entre no app com a sua senha de acesso."], APP_CAMPO);
+  if (decidiu && n.analise === "Devolvido") email_(para, "Checklist devolvido para correção: " + id, ["Olá, " + esc_(o.tecnico) + "!", quem + " devolveu o checklist da obra " + nomeObra_(o) + " para correção.", o.analiseObs ? "Comentário: " + esc_(o.analiseObs) : "", "Abra a aba Corrigir no app, ajuste os itens marcados e envie de novo."].filter(Boolean), APP_CAMPO);
+  if (decidiu && n.analise === "Aprovado") email_(para, "Checklist aprovado: " + id, ["Olá, " + esc_(o.tecnico) + "!", quem + " aprovou o checklist da obra " + nomeObra_(o) + ".", o.analiseObs ? "Comentário: " + esc_(o.analiseObs) : ""].filter(Boolean), APP_CAMPO);
   return { ok: true, id: id };
+}
+function limparCorrigidos_(obra) {
+  const sh = abaReg_(), iRev = COL_REG.map(c => c[0]).indexOf("rev") + 1;
+  ler_(sh, COL_REG).forEach(r => { if (r.obra === obra && r.rev === "corrigido") sh.getRange(r._linha, iRev).setValue(""); });
+}
+function excluirObra_(id) {
+  id = idObra_(id); if (!id) return { ok: false, erro: "Obra sem ID." };
+  const so = abaObras_(), sr = abaReg_();
+  const lo = ler_(so, COL_OBRAS).filter(o => o.id === id).map(o => o._linha);
+  if (!lo.length) return { ok: false, erro: "Obra não encontrada." };
+  const lr = ler_(sr, COL_REG).filter(r => r.obra === id).map(r => r._linha);
+  lr.sort((a, b) => b - a).forEach(l => sr.deleteRow(l));
+  lo.sort((a, b) => b - a).forEach(l => so.deleteRow(l));
+  return { ok: true, itens: lr.length };   // as fotos continuam na pasta da obra no Drive
+}
+function excluirTecnico_(nome) {
+  const sh = abaTec_(), t = ler_(sh, COL_TEC).filter(x => norm_(x.nome) === norm_(nome))[0];
+  if (!t) return { ok: false, erro: "Técnico não encontrado." };
+  const obras = ler_(abaObras_(), COL_OBRAS).filter(o => o.id && norm_(o.tecnico) === norm_(nome)).map(o => o.id);
+  if (obras.length) return { ok: false, erro: "Troque o técnico das obras " + obras.join(", ") + " antes de excluir (ou só desative o acesso)." };
+  sh.deleteRow(t._linha); return { ok: true };
 }
 
 function salvarTecnico_(t) {
@@ -261,10 +407,16 @@ function salvarTecnico_(t) {
   const sh = abaTec_(), lista = ler_(sh, COL_TEC);
   if (lista.some(x => x.codigo === codigo && norm_(x.nome) !== norm_(nome))) return { ok: false, erro: "Este código já é de outro técnico." };
   const velho = lista.filter(x => norm_(x.nome) === norm_(t.nomeAntigo || nome))[0];
-  const linha = [nome, codigo, limpa_(t.telefone, 40), t.ativo === false ? "Não" : "Sim"];
+  const email = String(t.email || "").trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, erro: "E-mail do técnico inválido." };
+  const linha = [nome, codigo, limpa_(t.telefone, 40), t.ativo === false ? "Não" : "Sim", email];
   if (velho) sh.getRange(velho._linha, 1, 1, COL_TEC.length).setValues([linha]);
   else sh.appendRow(linha);
   sh.getRange("B:B").setNumberFormat("@");
+  if (velho && norm_(velho.nome) !== norm_(nome)) {   // nome trocado: as obras acompanham
+    const so = abaObras_(), iT = COL_OBRAS.map(c => c[0]).indexOf("tecnico") + 1;
+    ler_(so, COL_OBRAS).forEach(o => { if (norm_(o.tecnico) === norm_(velho.nome)) so.getRange(o._linha, iT).setValue(nome); });
+  }
   return { ok: true };
 }
 
@@ -290,9 +442,11 @@ function salvarItens_(mudancas, autor, minhas) {
   const cat = {}; itens_().forEach(i => cat[i.codigo] = i);
   const aceitas = [], ignoradas = [], recusadas = [];
   const plano = Object.keys(cat).filter(c => cat[c].ativo && norm_(cat[c].categoria) === "PLANEJAMENTO");
-  const autorizadas = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id && o.liberadoCampo) autorizadas[o.id] = true; });
-  const planejamentoOk = obra => !!autorizadas[obra];   // campo liberado só depois da autorização do supervisor
-  const enviadas = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id && o.enviadoCampo) enviadas[o.id] = true; });
+  const info = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id) info[o.id] = o; });
+  const planejamentoOk = obra => !!(info[obra] && info[obra].liberadoCampo);   // campo liberado só depois da autorização do supervisor
+  const enviadas = {}; Object.keys(info).forEach(id => { if (info[id].enviadoCampo) enviadas[id] = true; });
+  const marcados = {};   // obra devolvida com itens marcados: o técnico só mexe neles
+  atuais.forEach(r => { if (r.rev === "corrigir" || r.rev === "corrigido") (marcados[r.obra] = marcados[r.obra] || {})[r.cod] = true; });
   mudancas.forEach(m => {
     const obra = idObra_(m.obra), cod = String(m.cod || "").trim(); if (!obra || !cod) return;
     const k = obra + "|" + cod;
@@ -301,20 +455,27 @@ function salvarItens_(mudancas, autor, minhas) {
       if (plano.indexOf(cod) >= 0) { recusadas.push(k); return; } // planejamento é do supervisor
       if (!planejamentoOk(obra)) { recusadas.push(k); return; }   // campo ainda bloqueado
       if (enviadas[obra]) { recusadas.push(k); return; }          // já enviado ao supervisor: só muda se ele devolver
+      if (info[obra] && info[obra].analise === "Devolvido" && marcados[obra] && !marcados[obra][cod]) { recusadas.push(k); return; }
     }
     const d = m.dados || {}, velho = porChave[k];
     // vale a alteração mais recente: se o servidor já tem uma mais nova, mantém a dele
     if (velho && velho.em && d.em && new Date(d.em).getTime() < new Date(velho.em).getTime() - 500) { ignoradas.push(k); return; }
     const fotos = (d.fotos || []).filter(f => String(f).indexOf("d:") === 0).map(f => String(f).slice(2));
     const it = cat[cod] || {};
+    // supervisor só marcou Aceitar / Corrigir: a resposta continua sendo de quem preencheu
+    const soAnalise = !minhas && velho && ["status", "obs", "parte", "prev", "concl"].every(c => String(d[c] == null ? "" : d[c]) === String(velho[c] == null ? "" : velho[c]));
     const r = {
       obra: obra, cod: cod, categoria: it.categoria || "", item: it.item || "", etapa: it.etapa || "",
       status: d.status || "", parte: d.parte, resp: d.resp, prev: d.prev, concl: d.concl, link: d.link, obs: d.obs,
-      em: d.em || new Date().toISOString(), por: autor,
-      pasta: fotos.length ? pastaObra_(obra).getUrl() : "", fotos: fotos.length ? JSON.stringify(fotos) : ""
+      em: d.em || new Date().toISOString(), por: soAnalise ? velho.por : autor,
+      pasta: fotos.length ? pastaObra_(obra).getUrl() : "", fotos: fotos.length ? JSON.stringify(fotos) : "",
+      rev: minhas ? (velho && (velho.rev === "corrigir" || velho.rev === "corrigido") ? "corrigido" : (velho ? velho.rev : ""))
+                  : (d.rev !== undefined ? d.rev : (velho ? velho.rev : "")),
+      revObs: minhas ? (velho ? velho.revObs : "") : (d.revObs !== undefined ? d.revObs : (velho ? velho.revObs : ""))
     };
     if (velho) sh.getRange(velho._linha, 1, 1, COL_REG.length).setValues([linha_(COL_REG, r)]);
-    else { sh.appendRow(linha_(COL_REG, r)); porChave[k] = { _linha: sh.getLastRow(), em: r.em, status: r.status }; }
+    else { sh.appendRow(linha_(COL_REG, r)); porChave[k] = { _linha: sh.getLastRow(), em: r.em, status: r.status, rev: r.rev, revObs: r.revObs }; }
+    if (porChave[k]) { porChave[k].rev = r.rev; porChave[k].revObs = r.revObs; }
     if (porChave[k]) porChave[k].status = r.status;
     aceitas.push(k);
   });
@@ -328,11 +489,21 @@ function enviarChecklist_(obraId, tecnico, minhas) {
   const sh = abaObras_(), o = ler_(sh, COL_OBRAS).filter(x => x.id === id)[0];
   if (!o || !o.liberadoCampo) return { ok: false, erro: "A obra ainda não foi autorizada para o campo." };
   if (o.enviadoCampo) return { ok: true, jaEnviado: true };
-  const resp = {}; ler_(abaReg_(), COL_REG).forEach(r => { if (r.obra === id && r.status) resp[r.cod] = true; });
-  const faltam = itens_().filter(i => i.ativo && norm_(i.categoria) !== "PLANEJAMENTO" && !resp[i.codigo]).map(i => i.codigo);
+  const reg = {}; ler_(abaReg_(), COL_REG).forEach(r => { if (r.obra === id) reg[r.cod] = r; });
+  const campo = itens_().filter(i => i.ativo && norm_(i.categoria) !== "PLANEJAMENTO");
+  const faltam = campo.filter(i => !(reg[i.codigo] && reg[i.codigo].status)).map(i => i.codigo);
   if (faltam.length) return { ok: false, erro: "Faltam " + faltam.length + " item(ns) sem resposta: " + faltam.join(", ") };
+  const incompletos = campo.filter(i => { const r = reg[i.codigo]; return r.status === "Pendente" && (!r.parte || !r.prev || !r.fotos); }).map(i => i.codigo);
+  if (incompletos.length) return { ok: false, erro: "Itens com Não precisam de quem resolve, prazo e foto: " + incompletos.join(", ") };
+  const semCorrecao = campo.filter(i => reg[i.codigo].rev === "corrigir").map(i => i.codigo);
+  if (semCorrecao.length) return { ok: false, erro: "Corrija os itens devolvidos pelo supervisor: " + semCorrecao.join(", ") };
   const n = Object.assign({}, o, { enviadoCampo: new Date().toISOString(), enviadoPor: tecnico, analise: "", analiseEm: "", analiseObs: o.analise === "Devolvido" ? o.analiseObs : "" });
   sh.getRange(o._linha, 1, 1, COL_OBRAS.length).setValues([linha_(COL_OBRAS, n)]);
+  const nao = campo.filter(i => reg[i.codigo].status === "Pendente").length, na = campo.filter(i => reg[i.codigo].status === "Não aplicável").length;
+  email_(emailsSupervisores_(), "Checklist preenchido para analisar: " + id, [
+    esc_(tecnico) + " enviou o checklist da obra " + nomeObra_(o) + ".",
+    (campo.length - nao - na) + " Sim · " + nao + " Não · " + na + " N/A.",
+    o.analise === "Devolvido" ? "É o reenvio depois da devolução para correção." : "", "Abra o painel para aprovar ou devolver."].filter(Boolean), APP_SUPERVISOR);
   return { ok: true };
 }
 
@@ -375,7 +546,6 @@ function verFoto_(id, minhas) {
 
 /* Rode uma vez pelo editor: cria a planilha, as abas e a pasta de fotos. */
 function configurar() {
-  abaObras_(); abaReg_(); abaItens_(); abaTec_(); pasta_(PASTA_FOTOS);
+  abaObras_(); abaReg_(); abaItens_(); abaTec_(); abaSup_(); pasta_(PASTA_FOTOS); senha_();
   Logger.log("Planilha: " + planilha_().getUrl());
-  Logger.log("Senha do supervisor em uso: " + senha_());
 }

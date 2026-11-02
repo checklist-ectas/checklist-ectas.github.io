@@ -75,9 +75,13 @@ const nPend = () => Object.keys(P.obras).length + Object.keys(P.itens).length;
 
 /* ---------- alterações ---------- */
 function alterarItem(obra, cod, patch) {
-  if (enviado(obraView(obra))) { toast("Checklist já enviado ao supervisor. Só muda se ele devolver para correção."); return; }
-  const atual = reg(obraView(obra), cod);
+  const ov = obraView(obra);
+  if (enviado(ov)) { toast("Checklist já enviado ao supervisor. Só muda se ele devolver para correção."); return; }
+  const it = itensAtivos(ov).find(i => i.codigo === cod);
+  if (it && travado(ov, it)) { toast("Na correção, só os itens devolvidos pelo supervisor podem ser alterados."); return; }
+  const atual = reg(ov, cod);
   const dados = { ...atual, ...patch, em: new Date().toISOString(), por: C.autor || "" };
+  if (marcadoRev(atual)) dados.rev = "corrigido";
   P.itens[obra + "|" + cod] = { obra, cod, dados }; salvarP(); render(); agendarSync(); }
 function alterarObra(id, dados) {
   P.obras[id] = { ...(P.obras[id] || {}), ...dados, id, em: new Date().toISOString(), por: C.autor || "" }; salvarP(); agendarSync(); }
@@ -270,6 +274,11 @@ function planejamento(o) { const its = itensAtivos(o).filter(ehPlanejamento);
 /* Envio ao supervisor: depois de enviado o checklist fica só para leitura, até o supervisor devolver */
 const enviado = o => !!(o && o.enviadoCampo);
 const dataHora = t => t ? new Date(t).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+const PARTES_RESOLVE = ["Cliente", "ECTAS", "Terceiro"];
+const faltaNoNao = r => resposta(r) !== "nao" ? [] : [!r.parte && "quem resolve", !r.prev && "prazo", !(r.fotos || []).length && "foto"].filter(Boolean);
+const marcadoRev = r => r.rev === "corrigir" || r.rev === "corrigido";
+const emCorrecao = o => !enviado(o) && o.analise === "Devolvido" && itensCampo(o).some(it => marcadoRev(reg(o, it.codigo)));
+const travado = (o, it) => enviado(o) || (emCorrecao(o) && !marcadoRev(reg(o, it.codigo)));
 function etapaEnvio(o) {
   if (o.analise === "Aprovado" && enviado(o)) return { t: "Aprovado pelo supervisor", c: "p-ok" };
   if (enviado(o)) return { t: "Enviado · em análise", c: "p-mob" };
@@ -300,7 +309,7 @@ function telaObra(id) {
     ? h("div", { class: "notice " + (o.analise === "Aprovado" ? "ok" : ""), text: o.analise === "Aprovado"
         ? `Checklist aprovado pelo supervisor em ${dataHora(o.analiseEm)}.` + (o.analiseObs ? " Comentário: " + o.analiseObs : "")
         : `Checklist enviado ao supervisor em ${dataHora(o.enviadoCampo)}. Aguardando a análise. As respostas ficam só para leitura.` })
-    : o.analise === "Devolvido" ? h("div", { class: "notice erro", text: "Devolvido para correção pelo supervisor" + (o.analiseObs ? ": " + o.analiseObs : ".") + " Corrija e envie de novo na aba Enviar." }) : null;
+    : o.analise === "Devolvido" ? h("div", { class: "notice erro", text: "Devolvido para correção pelo supervisor" + (o.analiseObs ? ": " + o.analiseObs : ".") + " Corrija os itens na aba Corrigir e envie de novo." }) : null;
   const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
     h("div", { class: "row" }, h("div", { class: "meta grow", text: [o.cliente, o.cidade, o.modelo].filter(Boolean).join(" · ") }), est ? h("span", { class: "pill " + est.c, text: est.t }) : null),
     o.previsaoMob || o.respEctas ? h("div", { class: "meta", text: [o.previsaoMob ? "Mobilização prevista " + fmt(o.previsaoMob) : "", o.respEctas ? "Responsável ECTAS: " + o.respEctas : ""].filter(Boolean).join(" · ") }) : null,
@@ -312,16 +321,25 @@ function telaObra(id) {
       h("div", { class: "stat" }, h("b", { text: r.vazio, style: r.vazio ? "color:var(--warn)" : "" }), h("span", { text: "Faltam" }))));
   // abas: Todos, uma por categoria (Civil, Elétrica, Montagem, Testes, Start-up, Segurança…) e Enviar
   const respCat = c => { const ci = its.filter(i => i.categoria === c); return [ci.filter(i => resposta(reg(o, i.codigo))).length, ci.length]; };
-  const abas = [["todos", "Todos"], ...cats.map(c => { const [a, t] = respCat(c); return ["cat:" + c, c + (a === t ? " ✓" : ` ${a}/${t}`)]; }), ["enviar", enviado(o) ? "Enviado ✓" : "Enviar"]];
-  if (!abas.some(f => f[0] === UI.filtroItens)) UI.filtroItens = "todos";
+  const corr = emCorrecao(o) ? its.filter(i => marcadoRev(reg(o, i.codigo))) : [], faltaCorr = corr.filter(i => reg(o, i.codigo).rev === "corrigir").length;
+  const abas = [...(corr.length ? [["corrigir", faltaCorr ? `Corrigir ${faltaCorr}` : "Corrigido ✓"]] : []), ["todos", "Todos"], ...cats.map(c => { const [a, t] = respCat(c); return ["cat:" + c, c + (a === t ? " ✓" : ` ${a}/${t}`)]; }), ["enviar", enviado(o) ? "Enviado ✓" : "Enviar"]];
+  const chave = o.id + (corr.length ? "|corrigir|" + (o.analiseEm || "") : "");   // devolução nova chegando: abre na aba Corrigir
+  if (UI.obraAberta !== chave) { UI.obraAberta = chave; UI.filtroItens = corr.length ? "corrigir" : "todos"; }
+  if (!abas.some(f => f[0] === UI.filtroItens)) UI.filtroItens = corr.length ? "corrigir" : "todos";
   const chips = h("div", { class: "chips abas", role: "tablist", "aria-label": "Partes do checklist" }, abas.map(([k, t]) =>
-    h("button", { class: "chip" + (k === "enviar" ? " chip-enviar" : ""), role: "tab", "aria-selected": String(UI.filtroItens === k), "aria-pressed": String(UI.filtroItens === k),
+    h("button", { class: "chip" + (k === "enviar" ? " chip-enviar" : k === "corrigir" ? " chip-corrigir" : ""), role: "tab", "aria-selected": String(UI.filtroItens === k), "aria-pressed": String(UI.filtroItens === k),
       onclick: () => { UI.filtroItens = k; render(); scrollTo(0, 0); } }, t)));
   const numero = {}; let n = 0;
   for (const it of cats.flatMap(c => its.filter(i => i.categoria === c))) numero[it.codigo] = ++n;
   if (UI.filtroItens === "enviar") { $("#main").replaceChildren(...[aviso, head, chips, telaEnviar(o, its, cats, r, numero)].filter(Boolean)); return; }
   const lista = [];
-  for (const c of cats) {
+  if (UI.filtroItens === "corrigir") {
+    const g = h("div", { class: "card ck" }, h("div", { class: "ck-cab" }, h("span", { class: "ck-cat" }, "Itens devolvidos pelo supervisor", h("small", { text: ` ${corr.length - faltaCorr}/${corr.length}` }))));
+    for (const it of corr) g.append(linhaItem(o, it, numero[it.codigo]));
+    lista.push(h("p", { class: "meta", style: "margin:0", text: "Só estes itens podem ser alterados. Ajuste a resposta, a observação ou as fotos de cada um e depois envie de novo." }), g,
+      h("button", { class: "btn", onclick: () => { UI.filtroItens = "enviar"; render(); scrollTo(0, 0); } }, "Ir para Enviar ›"));
+  }
+  for (const c of (UI.filtroItens === "corrigir" ? [] : cats)) {
     if (UI.filtroItens.startsWith("cat:") && UI.filtroItens.slice(4) !== c) continue;
     const ci = its.filter(i => i.categoria === c), [resp, tot] = respCat(c);
     const grupo = h("div", { class: "card ck" },
@@ -338,6 +356,7 @@ function telaObra(id) {
 /* aba Enviar: confere o que falta e envia o checklist ao supervisor */
 function telaEnviar(o, its, cats, r, numero) {
   const vazios = its.filter(i => !resposta(reg(o, i.codigo))), naos = its.filter(i => resposta(reg(o, i.codigo)) === "nao");
+  const incompletos = naos.filter(i => faltaNoNao(reg(o, i.codigo)).length), aCorrigir = emCorrecao(o) ? its.filter(i => reg(o, i.codigo).rev === "corrigir") : [];
   const irPara = it => { UI.filtroItens = "cat:" + it.categoria; UI.abertos.add(o.id + "|" + it.codigo); render(); scrollTo(0, 0); };
   const resumoCats = h("div", { class: "card ck" }, h("div", { class: "ck-cab", style: "grid-template-columns:1fr auto" }, h("span", { class: "ck-cat", text: "Parte" }), h("span", { text: "Respondidos" })),
     cats.map(c => { const ci = its.filter(i => i.categoria === c), a = ci.filter(i => resposta(reg(o, i.codigo))).length;
@@ -345,17 +364,21 @@ function telaEnviar(o, its, cats, r, numero) {
         h("span", { class: "pill " + (a === ci.length ? "p-ok" : "p-warn"), text: a === ci.length ? `✓ ${a}/${ci.length}` : `${a}/${ci.length}` })); }));
   const lista = (titulo, arr, cls, extra) => arr.length ? h("div", { class: "card ck" }, h("div", { class: "ck-cab", style: "grid-template-columns:1fr" }, h("span", { class: "ck-cat", text: titulo })),
     arr.map(it => h("button", { class: "env-linha", onclick: () => irPara(it) }, h("span", {}, h("b", { class: "ck-n", text: numero[it.codigo] + ". " }), it.item, extra ? h("div", { class: "meta", text: extra(it) }) : null),
-      h("span", { class: "pill " + cls, text: cls === "p-warn" ? "responder" : "Não" })))) : null;
+      h("span", { class: "pill " + cls, text: cls === "p-warn" ? "responder" : cls === "p-rev" ? "corrigir" : cls === "p-inc" ? "completar" : "Não" })))) : null;
   const kids = [resumoCats,
+    lista(`${aCorrigir.length} item(ns) devolvidos ainda sem correção`, aCorrigir, "p-rev", it => reg(o, it.codigo).revObs ? "Supervisor: " + reg(o, it.codigo).revObs : ""),
     lista(`Faltam ${vazios.length} item(ns) sem resposta`, vazios, "p-warn"),
-    lista(`${naos.length} item(ns) marcados como Não`, naos, "p-bad", it => reg(o, it.codigo).obs ? "Obs.: " + reg(o, it.codigo).obs : "Sem observação: toque para descrever o que falta")];
+    lista(`${incompletos.length} item(ns) com Não sem quem resolve, prazo ou foto`, incompletos, "p-inc", it => "Falta: " + faltaNoNao(reg(o, it.codigo)).join(", ")),
+    lista(`${naos.length} item(ns) marcados como Não`, naos.filter(i => !incompletos.includes(i)), "p-bad", it => { const g = reg(o, it.codigo); return [g.parte, g.prev ? "prazo " + fmt(g.prev) : "", g.obs].filter(Boolean).join(" · "); })];
   if (enviado(o)) {
     kids.unshift(h("div", { class: "card env-ok" }, h("b", { text: o.analise === "Aprovado" ? "Checklist aprovado" : "Checklist enviado" }),
       h("p", { class: "meta", style: "margin:0", text: `Enviado por ${o.enviadoPor || C.autor || "você"} em ${dataHora(o.enviadoCampo)}.` + (o.analise === "Aprovado" ? " Aprovado pelo supervisor em " + dataHora(o.analiseEm) + "." : " O supervisor vai analisar e, se precisar, devolve para correção.") }))); }
   else {
     const pendLocal = Object.values(P.itens).some(p => p.obra === o.id);
-    const msg = h("p", { class: "meta", style: "margin:0", text: vazios.length ? "Responda todos os itens para liberar o envio." : naos.filter(it => !reg(o, it.codigo).obs).length ? "Dica: descreva nas observações o que falta nos itens com Não antes de enviar." : "Tudo respondido. Confira e envie ao supervisor." });
-    const bt = h("button", { class: "btn", disabled: vazios.length || UI.enviando ? true : null }, UI.enviando ? "Enviando…" : "Enviar checklist ao supervisor");
+    const bloqueio = aCorrigir.length ? "Corrija os itens devolvidos pelo supervisor para liberar o envio." : vazios.length ? "Responda todos os itens para liberar o envio."
+      : incompletos.length ? "Nos itens com Não, informe quem resolve, o prazo e uma foto para liberar o envio." : "";
+    const msg = h("p", { class: "meta", style: "margin:0", text: bloqueio || "Tudo respondido. Confira e envie ao supervisor." });
+    const bt = h("button", { class: "btn", disabled: bloqueio || UI.enviando ? true : null }, UI.enviando ? "Enviando…" : "Enviar checklist ao supervisor");
     bt.onclick = () => { if (!bt.classList.contains("arm")) { bt.classList.add("arm"); bt.textContent = "Toque de novo para confirmar o envio"; setTimeout(() => { if (bt.isConnected) { bt.classList.remove("arm"); bt.textContent = "Enviar checklist ao supervisor"; } }, 4000); return; }
       enviarChecklist(o); };
     kids.unshift(h("div", { class: "card", style: "display:flex;flex-direction:column;gap:10px" }, h("b", { text: "Enviar ao supervisor" }),
@@ -381,19 +404,24 @@ async function enviarChecklist(o) {
   finally { UI.enviando = false; render(); } }
 
 function linhaItem(o, it, num) {
-  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), v = resposta(r), aberto = UI.abertos.has(key), so = enviado(o);
+  const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), v = resposta(r), aberto = UI.abertos.has(key), so = travado(o, it);
   const marcar = novo => { if (novo === v) return alterarItem(o.id, it.codigo, { status: "", concl: "" });   // tocar de novo limpa a resposta
+    if (novo === "nao" && !so) UI.abertos.add(key);   // Não abre na hora: quem resolve, prazo e foto
     alterarItem(o.id, it.codigo, novo === "sim" ? { status: "Concluído", concl: r.concl || hoje() } : novo === "na" ? { status: "Não aplicável", concl: "" } : { status: "Pendente", concl: "" }); };
+  const falta = so ? [] : faltaNoNao(r);
   const extras = [(r.fotos || []).length ? "📷 " + r.fotos.length : "", r.obs ? "✎ " + (r.obs.length > 34 ? r.obs.slice(0, 34) + "…" : r.obs) : ""].filter(Boolean).join("  ");
-  const linha = h("div", { class: "ck-linha", "data-v": v },
+  const linha = h("div", { class: "ck-linha" + (marcadoRev(r) && !enviado(o) ? " ck-rev" : ""), "data-v": v },
     h("div", { class: "ck-txt" },
       h("span", { class: "ck-item" }, h("b", { class: "ck-n", text: num + ". " }), it.item),
+      marcadoRev(r) && (o.analise === "Devolvido" || enviado(o)) ? h("div", { class: "ck-recado" }, h("span", { class: "pill " + (r.rev === "corrigir" ? "p-bad" : "p-ok"), text: r.rev === "corrigir" ? "Corrigir" : "Corrigido" }),
+        r.revObs ? " Supervisor: " + r.revObs : "") : null,
+      falta.length ? h("div", { class: "ck-falta", text: "Falta: " + falta.join(", ") }) : null,
       h("button", { class: "more ck-mais", "aria-expanded": String(aberto), onclick: () => { aberto ? UI.abertos.delete(key) : UI.abertos.add(key); render(); } },
-        extras || (aberto ? "Fechar" : so ? "" : "+ obs / foto"))),
+        aberto ? "Fechar" : (extras || (so ? "" : v === "nao" ? "+ pendência / foto" : "+ obs / foto")))),
     h("button", { class: "ck-b ck-sim", disabled: so || null, "aria-pressed": String(v === "sim"), "aria-label": "Sim: " + it.item, onclick: () => marcar("sim") }, "Sim"),
     h("button", { class: "ck-b ck-nao", disabled: so || null, "aria-pressed": String(v === "nao"), "aria-label": "Não: " + it.item, onclick: () => marcar("nao") }, "Não"),
     h("button", { class: "ck-b ck-na", disabled: so || null, "aria-pressed": String(v === "na"), "aria-label": "Não se aplica: " + it.item, onclick: () => marcar("na") }, "N/A"));
-  if (aberto) linha.append(so ? h("div", { class: "conf-extra meta", text: r.obs || "Sem observação." }) : obsFoto(o, it, r));
+  if (aberto) linha.append(so ? h("div", { class: "conf-extra meta", text: [r.parte ? "Quem resolve: " + r.parte : "", r.prev ? "Prazo: " + fmt(r.prev) : "", r.obs || "Sem observação."].filter(Boolean).join(" · ") }) : obsFoto(o, it, r));
   return linha; }
 
 function obsFoto(o, it, r) {
@@ -408,18 +436,40 @@ function obsFoto(o, it, r) {
     ph.append(x); if (ref.startsWith("l:")) ph.append(h("span", { class: "pend", text: "a enviar" })); fotos.append(ph); }
   const fi = h("input", { type: "file", accept: "image/*", id: "f-" + base, hidden: true, onchange: async e => {
     const arqs = [...e.target.files]; e.target.value = ""; const novas = [];
-    for (const f of arqs) { try { const dataUrl = await reduzir(f); const k = "l:" + uid(); await fPut(k, { dataUrl, obra: o.id, cod: it.codigo, pendente: true }); novas.push(k); } catch (err) { toast("Não foi possível ler a foto."); } }
+    for (const f of arqs) { try { const dataUrl = await reduzir(f, o, it); const k = "l:" + uid(); await fPut(k, { dataUrl, obra: o.id, cod: it.codigo, pendente: true }); novas.push(k); } catch (err) { toast("Não foi possível ler a foto."); } }
     if (novas.length) { const atual = reg(obraView(o.id), it.codigo); salvar({ fotos: [...(atual.fotos || []), ...novas] }); toast("Foto adicionada"); } } });
   fi.multiple = true;
   fotos.append(h("label", { class: "addph", for: "f-" + base }, h("b", { text: "+" }), "Foto"), fi);
-  return h("div", { class: "conf-extra" },
-    h("label", { class: "f" }, "Observação", h("textarea", { id: "ob-" + base, placeholder: "O que falta, quem resolve, previsão…", onchange: e => salvar({ obs: e.target.value }) }, r.obs || "")),
-    fotos); }
+  const nao = resposta(r) === "nao";
+  const pend = nao ? h("div", { class: "pend-nao" },
+    h("div", { class: "f-lbl", text: "Quem resolve *" }),
+    h("div", { class: "pend-partes" }, PARTES_RESOLVE.map(pt => h("button", { type: "button", class: "chip", "aria-pressed": String(r.parte === pt), onclick: () => salvar({ parte: r.parte === pt ? "" : pt }) }, pt))),
+    h("label", { class: "f" }, "Prazo para resolver *", h("input", { type: "date", id: "pz-" + base, value: r.prev || "", min: hoje(), onchange: e => salvar({ prev: e.target.value }) }))) : null;
+  return h("div", { class: "conf-extra" }, pend,
+    h("label", { class: "f" }, nao ? "O que falta *" : "Observação", h("textarea", { id: "ob-" + base, placeholder: nao ? "Descreva o que falta para o item ficar pronto" : "Observação (opcional)", onchange: e => salvar({ obs: e.target.value }) }, r.obs || "")),
+    nao ? h("div", { class: "f-lbl", text: "Foto do item *" }) : null, fotos,
+    h("p", { class: "meta", style: "margin:0", text: "As fotos saem com data, hora e localização gravadas na imagem." })); }
 
-async function reduzir(file) {
-  const bmp = await createImageBitmap(file); const max = 1600, k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+let ultimaPos = null;
+function posicao() {   // localização do celular na hora da foto (o técnico autoriza uma vez)
+  if (ultimaPos && Date.now() - ultimaPos.t < 120000) return Promise.resolve(ultimaPos);
+  if (!navigator.geolocation) return Promise.resolve(null);
+  return new Promise(ok => { const t = setTimeout(() => ok(null), 9000);
+    navigator.geolocation.getCurrentPosition(p => { clearTimeout(t); ultimaPos = { lat: p.coords.latitude, lon: p.coords.longitude, prec: p.coords.accuracy, t: Date.now() }; ok(ultimaPos); },
+      () => { clearTimeout(t); ok(null); }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }); }); }
+async function reduzir(file, o, it) {
+  const [bmp, pos] = await Promise.all([createImageBitmap(file), posicao()]); const max = 1600, k = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
-  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height); return c.toDataURL("image/jpeg", 0.8); }
+  const g = c.getContext("2d"); g.drawImage(bmp, 0, 0, c.width, c.height);
+  // carimbo: obra e item, data e hora, coordenadas
+  const agora = new Date(), dt = agora.toLocaleDateString("pt-BR") + " " + agora.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const linhas = [(o ? o.id + (o.nome ? " · " + o.nome : "") : "") + (it ? " · " + it.codigo : ""), dt + (C.autor ? " · " + C.autor : ""),
+    pos ? `Lat ${pos.lat.toFixed(6)}  Lon ${pos.lon.toFixed(6)}  (±${Math.round(pos.prec)} m)` : "Localização não disponível"].filter(Boolean);
+  const fs = Math.max(14, Math.round(c.width / 48)), pad = Math.round(fs * 0.6), alt = linhas.length * fs * 1.3 + pad * 2;
+  g.fillStyle = "rgba(0,0,0,.55)"; g.fillRect(0, c.height - alt, c.width, alt);
+  g.fillStyle = "#fff"; g.font = `600 ${fs}px Montserrat, Arial, sans-serif`; g.textBaseline = "top";
+  linhas.forEach((l, i) => g.fillText(l, pad, c.height - alt + pad + i * fs * 1.3, c.width - pad * 2));
+  return c.toDataURL("image/jpeg", 0.8); }
 async function dadosFoto(ref) {
   const loc = await fGet(ref); if (loc && loc.dataUrl) return loc.dataUrl;
   if (ref.startsWith("d:") && CENTRAL.url && navigator.onLine) { try { const r = await api({ acao: "verFoto", id: ref.slice(2) }); const d = "data:image/jpeg;base64," + r.b64; await fPut(ref, { dataUrl: d }); return d; } catch (e) { } }
