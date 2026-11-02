@@ -98,7 +98,7 @@ function setSync(msg, erro) { UI.sincMsg = msg; UI.sincErro = !!erro; pintarSync
 function pintarSync() {
   const el = $("#sync"); if (!el) return; el.className = "sync wrap" + (UI.sincErro ? " erro" : "");
   const n = nPend();
-  el.replaceChildren(...[h("span", { text: UI.sincMsg + (CENTRAL.url && n && !UI.sinc ? ` · ${n} alteração(ões) no celular` : "") }),
+  el.replaceChildren(...[h("span", { text: UI.sincMsg + (CENTRAL.url && n && !UI.sinc ? ` · ${n} a enviar` : "") }),
     CENTRAL.url && !UI.sinc ? h("button", { onclick: () => sincronizar() }, "Sincronizar") : null].filter(Boolean)); }
 async function sincronizar() {
   if (!CENTRAL.url) { setSync("Salvo neste celular. Envie o PDF ou o Excel ao supervisor."); return; }
@@ -309,7 +309,7 @@ function telaObra(id) {
       h("div", { class: "stat" }, h("b", { text: r.sim, style: "color:var(--ok)" }), h("span", { text: "Sim" })),
       h("div", { class: "stat" }, h("b", { text: r.nao, style: r.nao ? "color:var(--bad)" : "" }), h("span", { text: "Não" })),
       h("div", { class: "stat" }, h("b", { text: r.na }), h("span", { text: "N/A" })),
-      h("div", { class: "stat" }, h("b", { text: r.vazio, style: r.vazio ? "color:var(--warn)" : "" }), h("span", { text: "Sem resposta" }))));
+      h("div", { class: "stat" }, h("b", { text: r.vazio, style: r.vazio ? "color:var(--warn)" : "" }), h("span", { text: "Faltam" }))));
   // abas: Todos, uma por categoria (Civil, Elétrica, Montagem, Testes, Start-up, Segurança…) e Enviar
   const respCat = c => { const ci = its.filter(i => i.categoria === c); return [ci.filter(i => resposta(reg(o, i.codigo))).length, ci.length]; };
   const abas = [["todos", "Todos"], ...cats.map(c => { const [a, t] = respCat(c); return ["cat:" + c, c + (a === t ? " ✓" : ` ${a}/${t}`)]; }), ["enviar", enviado(o) ? "Enviado ✓" : "Enviar"]];
@@ -512,6 +512,9 @@ async function enviarPdf(o) {
     (r.pendMob ? `\nItens de mobilização ainda sem Sim: ${itensAtivos(o).filter(it => it.etapa === "Mobilização" && pend.includes(it)).map(it => it.codigo).join(", ")}` : "");
   entregar(doc.output("blob"), `Checklist ${o.id} ${hoje()}.pdf`, texto); }
 
+/* abas das partes ficam presas logo abaixo do cabeçalho ao rolar */
+const medirTopo = () => document.documentElement.style.setProperty("--topo", ($("#topo") ? $("#topo").offsetHeight : 0) + "px");
+if (window.ResizeObserver) new ResizeObserver(medirTopo).observe($("#topo")); addEventListener("resize", medirTopo);
 /* ---------- início ---------- */
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => { });
 UI.rota = lerHash(); render(); processarLink();

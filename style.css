@@ -153,3 +153,21 @@ textarea{resize:vertical;min-height:70px}
 .ck-b:disabled{opacity:.55;cursor:default}
 .ck-na[aria-pressed="true"]{background:var(--na);border-color:var(--na);color:#fff}
 .ck-linha[data-v="na"] .ck-item{color:var(--muted)}
+/* celular: item em cima, botões Sim / Não / N/A grandes embaixo, abas presas abaixo do cabeçalho */
+.chips.abas{top:var(--topo,0px)}
+@media (max-width:600px){
+  .ck{padding:4px 12px 6px}
+  .ck-cab{grid-template-columns:1fr}
+  .ck-cab span:not(.ck-cat){display:none}
+  .ck-linha{grid-template-columns:repeat(3,1fr);gap:8px;padding:12px 0}
+  .ck-linha .ck-txt{display:contents}
+  .ck-linha .ck-item{grid-column:1/-1;font-size:15.5px}
+  .ck-linha .ck-mais{grid-column:1/-1;order:2;padding:0}
+  .ck-linha .conf-extra{order:3}
+  .ck-b{height:50px;font-size:15.5px}
+  .stats{gap:6px}
+  .stat{padding:6px 2px}
+  .stat b{font-size:18px}
+  .stat span{font-size:9.5px}
+  .chip{padding:9px 13px;font-size:14px}
+}
