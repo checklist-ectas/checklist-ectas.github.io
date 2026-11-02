@@ -249,14 +249,19 @@ function itens_() {
 }
 
 /* ---------------- supervisores ---------------- */
-// usuário vazio ou "admin" = administrador (senha nas Propriedades do script); senão, e-mail ou nome da aba SUPERVISORES
+// Entrada só com a senha: a senha do administrador (Propriedades do script) ou a de um supervisor da aba SUPERVISORES.
+// Por isso cada supervisor tem uma senha diferente (a central não deixa repetir).
 function supervisor_(b) {
-  const usuario = String(b.usuario || "").trim(), senha = String(b.senha || "");
+  const senha = String(b.senha || "");
   if (!senha) return null;
-  if (!usuario || ["ADMIN", "ADMINISTRADOR"].indexOf(norm_(usuario)) >= 0) return senha === senha_() ? { nome: "Administrador", email: "", admin: true, mestre: true } : null;
-  const s = ler_(abaSup_(), COL_SUP).filter(x => x.nome && ativo_(x.ativo) && (norm_(x.email) === norm_(usuario) || norm_(x.nome) === norm_(usuario)))[0];
-  if (!s || !s.sal || hash_(senha, s.sal) !== s.hash) return null;
+  if (senha === senha_()) return { nome: "Administrador", email: "", admin: true, mestre: true };
+  const s = ler_(abaSup_(), COL_SUP).filter(x => x.nome && ativo_(x.ativo) && x.sal && hash_(senha, x.sal) === x.hash)[0];
+  if (!s) return null;
   return { nome: String(s.nome).trim(), email: String(s.email || "").trim(), admin: sim_(s.admin), _linha: s._linha, sal: s.sal };
+}
+function senhaEmUso_(senha, exceto) {   // exceto: nome do supervisor que está trocando a própria senha ("ADMIN" para o administrador)
+  if (exceto !== "ADMIN" && senha === senha_()) return true;
+  return ler_(abaSup_(), COL_SUP).some(x => x.nome && x.sal && norm_(x.nome) !== norm_(exceto || "") && hash_(senha, x.sal) === x.hash);
 }
 function supervisores_() { return ler_(abaSup_(), COL_SUP).filter(x => x.nome).map(x => ({ nome: String(x.nome).trim(), email: x.email || "", ativo: ativo_(x.ativo), admin: sim_(x.admin) })); }
 function salvarSupervisor_(n, sup) {
@@ -268,7 +273,9 @@ function salvarSupervisor_(n, sup) {
   if (sup && !sup.admin && ((velho && sim_(velho.admin)) || n.admin)) return { ok: false, erro: "Só o administrador mexe em contas de administrador." };
   if (lista.some(x => x !== velho && (norm_(x.nome) === norm_(nome) || (email && norm_(x.email) === norm_(email))))) return { ok: false, erro: "Já existe um supervisor com esse nome ou e-mail." };
   let sal = velho ? velho.sal : "", hash = velho ? velho.hash : "";
-  if (n.senha) { if (String(n.senha).length < 6) return { ok: false, erro: "A senha precisa ter pelo menos 6 caracteres." }; sal = Utilities.getUuid(); hash = hash_(String(n.senha), sal); }
+  if (n.senha) { if (String(n.senha).length < 6) return { ok: false, erro: "A senha precisa ter pelo menos 6 caracteres." };
+    if (senhaEmUso_(String(n.senha), velho ? velho.nome : nome)) return { ok: false, erro: "Esta senha já é usada por outro supervisor. Escolha outra: cada supervisor entra só com a própria senha." };
+    sal = Utilities.getUuid(); hash = hash_(String(n.senha), sal); }
   if (!hash) return { ok: false, erro: "Defina uma senha para o novo supervisor." };
   const linha = [nome, email, sal, hash, n.ativo === false ? "Não" : "Sim", (sup && !sup.admin) ? "Não" : (n.admin ? "Sim" : "Não")];
   if (velho) sh.getRange(velho._linha, 1, 1, COL_SUP.length).setValues([linha]); else sh.appendRow(linha);
@@ -277,6 +284,7 @@ function salvarSupervisor_(n, sup) {
 function trocarSenha_(sup, nova) {
   nova = String(nova || "");
   if (nova.length < 6) return { ok: false, erro: "A nova senha precisa ter pelo menos 6 caracteres." };
+  if (senhaEmUso_(nova, sup.mestre ? "ADMIN" : sup.nome)) return { ok: false, erro: "Esta senha já é usada por outro supervisor. Escolha outra." };
   if (sup.mestre) { PropertiesService.getScriptProperties().setProperty("SENHA_SUPERVISOR", nova); return { ok: true }; }
   const sal = Utilities.getUuid(), sh = abaSup_();
   sh.getRange(sup._linha, 3, 1, 2).setValues([[sal, hash_(nova, sal)]]);

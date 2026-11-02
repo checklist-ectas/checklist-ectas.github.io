@@ -7,7 +7,7 @@ const MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julh
 const ler = (k, p) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? p : v; } catch (e) { return p; } };
 const gravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } };
 let D = ler("sup-dados", { obras: {}, itens: [], fonte: "", em: null });   // dados em uso
-let SENHA = ler("sup-senha", ""), USUARIO = ler("sup-usuario", "");
+let SENHA = ler("sup-senha", ""), USUARIO = "";   // entrada só com a senha
 const UI = { aba: "obras", filtro: "ativas", busca: "", ano: new Date().getFullYear(), obra: null, form: null, link: null, carregando: false, erro: "" };
 const SITUACOES = ["Em pré-instalação", "Mobilizada", "Instalação concluída", "Suspensa", "Cancelada"];
 const ROTULO = { "Concluído": "Sim", "Pendente": "Não", "Em andamento": "Não", "Não aplicável": "Não se aplica", "": "Sem resposta" };
@@ -124,11 +124,10 @@ function render() {
 
 function telaSenha(m) {
   const msg = h("p", { class: "meta", text: UI.erro });
-  m.replaceChildren(h("form", { class: "card ent", onsubmit: async e => { e.preventDefault(); USUARIO = $("#s-usuario").value.trim(); SENHA = $("#s-senha").value; msg.textContent = "Conferindo…";
-      try { await api({ acao: "supPing" }); gravar("sup-senha", SENHA); gravar("sup-usuario", USUARIO); UI.erro = ""; carregarCentral(); }
-      catch (err) { SENHA = ""; msg.textContent = err.senha ? "Usuário ou senha incorretos." : "Sem conexão com a central."; } } },
-    h("h2", { text: "Acesso do supervisor" }), h("p", { class: "meta", text: "Entre com o seu e-mail e a sua senha. O administrador deixa o e-mail em branco." }),
-    h("label", { class: "f" }, "E-mail", h("input", { id: "s-usuario", type: "email", autocomplete: "username", value: USUARIO, placeholder: "seu.nome@ectas.com.br" })),
+  m.replaceChildren(h("form", { class: "card ent", onsubmit: async e => { e.preventDefault(); SENHA = $("#s-senha").value; msg.textContent = "Conferindo…";
+      try { await api({ acao: "supPing" }); gravar("sup-senha", SENHA); UI.erro = ""; carregarCentral(); }
+      catch (err) { SENHA = ""; msg.textContent = err.senha ? "Senha incorreta." : "Sem conexão com a central."; } } },
+    h("h2", { text: "Acesso do supervisor" }), h("p", { class: "meta", text: "Digite a sua senha de supervisor." }),
     h("label", { class: "f" }, "Senha", h("input", { id: "s-senha", type: "password", required: true, autocomplete: "current-password" })),
     h("button", { class: "btn", type: "submit" }, "Entrar"), msg)); }
 
@@ -492,13 +491,13 @@ function telaAcesso() {
         if (await salvarSup(s, "Supervisor cadastrado. Envie a ele o usuário e a senha.")) m2.textContent = ""; else m2.textContent = UI.erro; } },
       h("div", { class: "full", style: "font-weight:700", text: "Cadastrar supervisor" }),
       h("label", { class: "f" }, "Nome", h("input", { id: "s-nome", required: true })),
-      h("label", { class: "f" }, "E-mail (usuário e avisos)", h("input", { id: "s-email", type: "email", required: true, autocomplete: "off" })),
+      h("label", { class: "f" }, "E-mail (opcional, para receber avisos)", h("input", { id: "s-email", type: "email", autocomplete: "off" })),
       h("label", { class: "f" }, "Senha (digite ou use a sugerida, mínimo 6)", h("input", { id: "s-senha-n", required: true, value: novaSenhaSup(), minlength: "6", autocomplete: "off" })),
       eu.admin ? h("label", { class: "f", style: "flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13.5px" }, h("input", { id: "s-admin", type: "checkbox" }), "Administrador (muda os avisos por e-mail e as contas de administrador)") : h("span"),
       h("div", { class: "row full" }, h("button", { class: "btn", type: "submit" }, "Cadastrar supervisor"), m2));
     const sups = (D.supervisores || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     kids.push(h("b", { text: "Supervisores" }),
-      h("p", { class: "meta", style: "margin:0", text: "Cadastre os supervisores e defina a senha de cada um. Eles entram com o próprio e-mail e senha e podem trocá-la depois em “Minha senha”. O nome fica registrado em quem autorizou, devolveu ou aprovou cada obra." }),
+      h("p", { class: "meta", style: "margin:0", text: "Cadastre os supervisores e defina a senha de cada um. Eles entram no painel só com a senha, que precisa ser diferente da dos outros supervisores, e podem trocá-la depois em “Minha senha”. O nome fica registrado em quem autorizou, devolveu ou validou cada obra." }),
       form,
       sups.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Supervisor", "E-mail", "Perfil", ""].map(t => h("th", { text: t })))),
         h("tbody", {}, sups.map(s => h("tr", { style: s.ativo ? "" : "opacity:.55" }, h("td", {}, h("b", { text: s.nome })), h("td", { text: s.email }), h("td", { text: s.admin ? "Administrador" : "Supervisor" }),
