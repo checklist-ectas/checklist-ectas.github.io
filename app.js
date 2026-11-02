@@ -257,7 +257,7 @@ function desenharLista() {
           : (() => { const e = etapaEnvio(o); return e ? h("span", { class: "pill " + e.c, text: e.t }) : h("span", { class: "pill " + (r.vazio ? "p-warn" : "p-mob"), text: r.vazio ? r.vazio + " sem resposta" : "Pronto para enviar" }); })()),
       h("h3", { text: o.nome || "(sem nome)" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") }),
       h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.pct * 100)}%` })),
-      h("div", { class: "row meta" }, h("span", { text: `${r.sim + r.nao} de ${r.total} respondidos · ${r.sim} Sim · ${r.nao} Não` }), h("span", { class: "grow" }),
+      h("div", { class: "row meta" }, h("span", { text: `${r.resp} de ${r.total} respondidos · ${r.sim} Sim · ${r.nao} Não` + (r.na ? ` · ${r.na} N/A` : "") }), h("span", { class: "grow" }),
         o.previsaoMob ? h("span", { text: "Mobilização " + fmt(o.previsaoMob) }) : null)); })); }
 
 /* Planejamento é do supervisor: o campo só é liberado com todo o planejamento Sim ou Não se aplica */
@@ -275,12 +275,13 @@ function etapaEnvio(o) {
   if (enviado(o)) return { t: "Enviado · em análise", c: "p-mob" };
   if (o.analise === "Devolvido") return { t: "Devolvido para correção", c: "p-bad" };
   return null; }
-/* Lista de checagem: Sim = "Concluído", Não = "Pendente" (status da planilha), sem resposta = vazio */
-const resposta = r => r.status === "Concluído" ? "sim" : r.status ? "nao" : "";
-function resumoCampo(o) { let sim = 0, nao = 0, total = 0, mob = 0;
-  for (const it of itensCampo(o)) { const r = reg(o, it.codigo); if (r.status === "Não aplicável") continue; total++;
-    const v = resposta(r); if (v === "sim") sim++; else { if (v === "nao") nao++; if (it.etapa === "Mobilização") mob++; } }
-  return { sim, nao, vazio: total - sim - nao, total, mob, conf: sim, pct: total ? sim / total : 0 }; }
+/* Lista de checagem: Sim = "Concluído", Não = "Pendente", N/A = "Não aplicável" (status da planilha), sem resposta = vazio */
+const resposta = r => r.status === "Concluído" ? "sim" : r.status === "Não aplicável" ? "na" : r.status ? "nao" : "";
+function resumoCampo(o) { let sim = 0, nao = 0, na = 0, total = 0, mob = 0;
+  for (const it of itensCampo(o)) { const r = reg(o, it.codigo); total++;
+    const v = resposta(r); if (v === "sim") sim++; else if (v === "na") na++; else { if (v === "nao") nao++; if (it.etapa === "Mobilização") mob++; } }
+  const resp = sim + nao + na;
+  return { sim, nao, na, resp, vazio: total - resp, total, mob, conf: sim, pct: total ? resp / total : 0 }; }
 
 function telaObra(id) {
   const o = obraView(id);
@@ -293,7 +294,7 @@ function telaObra(id) {
       h("p", { text: `Planejamento: ${pl.ok} de ${pl.total} itens concluídos pelo supervisor. Quando ele enviar a autorização para o campo, o checklist desta obra aparece aqui.` }),
       CENTRAL.url ? h("button", { class: "btn sec", style: "margin:8px auto 0", onclick: () => sincronizar() }, "Verificar de novo") : h("p", { class: "meta", text: "Peça ao supervisor o link atualizado depois que ele concluir o planejamento." })));
     return; }
-  const its = itensCampo(o).filter(i => reg(o, i.codigo).status !== "Não aplicável"), cats = [...new Set(its.map(i => i.categoria))];
+  const its = itensCampo(o), cats = [...new Set(its.map(i => i.categoria))];
   const est = etapaEnvio(o);
   const aviso = enviado(o)
     ? h("div", { class: "notice " + (o.analise === "Aprovado" ? "ok" : ""), text: o.analise === "Aprovado"
@@ -303,10 +304,11 @@ function telaObra(id) {
   const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
     h("div", { class: "row" }, h("div", { class: "meta grow", text: [o.cliente, o.cidade, o.modelo].filter(Boolean).join(" · ") }), est ? h("span", { class: "pill " + est.c, text: est.t }) : null),
     o.previsaoMob || o.respEctas ? h("div", { class: "meta", text: [o.previsaoMob ? "Mobilização prevista " + fmt(o.previsaoMob) : "", o.respEctas ? "Responsável ECTAS: " + o.respEctas : ""].filter(Boolean).join(" · ") }) : null,
-    h("div", { class: "prog" }, h("i", { style: `width:${Math.round((r.sim + r.nao) / (r.total || 1) * 100)}%` })),
-    h("div", { class: "stats", style: "grid-template-columns:repeat(3,1fr)" },
+    h("div", { class: "prog" }, h("i", { style: `width:${Math.round(r.resp / (r.total || 1) * 100)}%` })),
+    h("div", { class: "stats", style: "grid-template-columns:repeat(4,1fr)" },
       h("div", { class: "stat" }, h("b", { text: r.sim, style: "color:var(--ok)" }), h("span", { text: "Sim" })),
       h("div", { class: "stat" }, h("b", { text: r.nao, style: r.nao ? "color:var(--bad)" : "" }), h("span", { text: "Não" })),
+      h("div", { class: "stat" }, h("b", { text: r.na }), h("span", { text: "N/A" })),
       h("div", { class: "stat" }, h("b", { text: r.vazio, style: r.vazio ? "color:var(--warn)" : "" }), h("span", { text: "Sem resposta" }))));
   // abas: Todos, uma por categoria (Civil, Elétrica, Montagem, Testes, Start-up, Segurança…) e Enviar
   const respCat = c => { const ci = its.filter(i => i.categoria === c); return [ci.filter(i => resposta(reg(o, i.codigo))).length, ci.length]; };
@@ -323,7 +325,7 @@ function telaObra(id) {
     if (UI.filtroItens.startsWith("cat:") && UI.filtroItens.slice(4) !== c) continue;
     const ci = its.filter(i => i.categoria === c), [resp, tot] = respCat(c);
     const grupo = h("div", { class: "card ck" },
-      h("div", { class: "ck-cab" }, h("span", { class: "ck-cat" }, c, h("small", { text: ` ${resp}/${tot}` })), h("span", { text: "Sim" }), h("span", { text: "Não" })));
+      h("div", { class: "ck-cab" }, h("span", { class: "ck-cat" }, c, h("small", { text: ` ${resp}/${tot}` })), h("span", { text: "Sim" }), h("span", { text: "Não" }), h("span", { text: "N/A" })));
     for (const it of ci) grupo.append(linhaItem(o, it, numero[it.codigo]));
     lista.push(grupo);
   }
@@ -357,7 +359,7 @@ function telaEnviar(o, its, cats, r, numero) {
     bt.onclick = () => { if (!bt.classList.contains("arm")) { bt.classList.add("arm"); bt.textContent = "Toque de novo para confirmar o envio"; setTimeout(() => { if (bt.isConnected) { bt.classList.remove("arm"); bt.textContent = "Enviar checklist ao supervisor"; } }, 4000); return; }
       enviarChecklist(o); };
     kids.unshift(h("div", { class: "card", style: "display:flex;flex-direction:column;gap:10px" }, h("b", { text: "Enviar ao supervisor" }),
-      h("p", { class: "meta", style: "margin:0", text: `${r.sim + r.nao} de ${r.total} itens respondidos · ${r.sim} Sim · ${r.nao} Não.` + (CENTRAL.url ? " Depois de enviado, o checklist aparece como preenchido no painel do supervisor e fica só para leitura." : " Sem a central, o envio gera o Excel desta obra para você mandar ao supervisor.") }),
+      h("p", { class: "meta", style: "margin:0", text: `${r.resp} de ${r.total} itens respondidos · ${r.sim} Sim · ${r.nao} Não · ${r.na} N/A.` + (CENTRAL.url ? " Depois de enviado, o checklist aparece como preenchido no painel do supervisor e fica só para leitura." : " Sem a central, o envio gera o Excel desta obra para você mandar ao supervisor.") }),
       msg, bt, CENTRAL.url && pendLocal ? h("p", { class: "meta", style: "margin:0", text: "Há respostas ainda no celular: elas são sincronizadas antes do envio." }) : null)); }
   kids.push(h("button", { class: "btn sec", onclick: () => enviarPdf(o) }, "Compartilhar PDF do checklist"));
   return h("div", { style: "display:flex;flex-direction:column;gap:12px" }, ...kids.filter(Boolean)); }
@@ -381,7 +383,7 @@ async function enviarChecklist(o) {
 function linhaItem(o, it, num) {
   const key = o.id + "|" + it.codigo, r = reg(o, it.codigo), v = resposta(r), aberto = UI.abertos.has(key), so = enviado(o);
   const marcar = novo => { if (novo === v) return alterarItem(o.id, it.codigo, { status: "", concl: "" });   // tocar de novo limpa a resposta
-    alterarItem(o.id, it.codigo, novo === "sim" ? { status: "Concluído", concl: r.concl || hoje() } : { status: "Pendente", concl: "" }); };
+    alterarItem(o.id, it.codigo, novo === "sim" ? { status: "Concluído", concl: r.concl || hoje() } : novo === "na" ? { status: "Não aplicável", concl: "" } : { status: "Pendente", concl: "" }); };
   const extras = [(r.fotos || []).length ? "📷 " + r.fotos.length : "", r.obs ? "✎ " + (r.obs.length > 34 ? r.obs.slice(0, 34) + "…" : r.obs) : ""].filter(Boolean).join("  ");
   const linha = h("div", { class: "ck-linha", "data-v": v },
     h("div", { class: "ck-txt" },
@@ -389,7 +391,8 @@ function linhaItem(o, it, num) {
       h("button", { class: "more ck-mais", "aria-expanded": String(aberto), onclick: () => { aberto ? UI.abertos.delete(key) : UI.abertos.add(key); render(); } },
         extras || (aberto ? "Fechar" : so ? "" : "+ obs / foto"))),
     h("button", { class: "ck-b ck-sim", disabled: so || null, "aria-pressed": String(v === "sim"), "aria-label": "Sim: " + it.item, onclick: () => marcar("sim") }, "Sim"),
-    h("button", { class: "ck-b ck-nao", disabled: so || null, "aria-pressed": String(v === "nao"), "aria-label": "Não: " + it.item, onclick: () => marcar("nao") }, "Não"));
+    h("button", { class: "ck-b ck-nao", disabled: so || null, "aria-pressed": String(v === "nao"), "aria-label": "Não: " + it.item, onclick: () => marcar("nao") }, "Não"),
+    h("button", { class: "ck-b ck-na", disabled: so || null, "aria-pressed": String(v === "na"), "aria-label": "Não se aplica: " + it.item, onclick: () => marcar("na") }, "N/A"));
   if (aberto) linha.append(so ? h("div", { class: "conf-extra meta", text: r.obs || "Sem observação." }) : obsFoto(o, it, r));
   return linha; }
 
@@ -480,7 +483,7 @@ async function enviarPdf(o) {
   cab();
   doc.setFontSize(9); doc.setTextColor(29, 29, 27);
   const linhasInfo = [["Obra", o.nome], ["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
-    ["Previsão de mobilização", fmt(o.previsaoMob)], ["Checagem", (() => { const q = resumoCampo(o); return q.sim + " Sim · " + q.nao + " Não · " + q.vazio + " sem resposta (de " + q.total + " itens)"; })()]];
+    ["Previsão de mobilização", fmt(o.previsaoMob)], ["Checagem", (() => { const q = resumoCampo(o); return q.sim + " Sim · " + q.nao + " Não · " + q.na + " N/A · " + q.vazio + " sem resposta (de " + q.total + " itens)"; })()]];
   for (const [k, v] of linhasInfo) { if (!v) continue; doc.setFont("helvetica", "bold"); doc.text(k + ":", M, y); doc.setFont("helvetica", "normal");
     const t = doc.splitTextToSize(String(v), W - 2 * M - 42); doc.text(t, M + 42, y); y += 4.6 * t.length; }
   y += 3;
@@ -505,7 +508,7 @@ async function enviarPdf(o) {
   for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7); doc.setTextColor(...CINZA);
     doc.text("Gerado em " + new Date().toLocaleString("pt-BR") + (C.autor ? " por " + C.autor : "") + " · ECTAS Saneamento", M, 292); doc.text(i + "/" + n, W - M, 292, { align: "right" }); }
   const pend = itensAtivos(o).filter(it => !["Concluído", "Não aplicável"].includes(stOf(o, it.codigo)));
-  const texto = `Checklist de pré-instalação - ${o.id} ${o.nome || ""}\n${resumoCampo(o).sim} Sim · ${resumoCampo(o).nao} Não · ${resumoCampo(o).vazio} sem resposta` +
+  const texto = `Checklist de pré-instalação - ${o.id} ${o.nome || ""}\n${resumoCampo(o).sim} Sim · ${resumoCampo(o).nao} Não · ${resumoCampo(o).na} N/A · ${resumoCampo(o).vazio} sem resposta` +
     (r.pendMob ? `\nItens de mobilização ainda sem Sim: ${itensAtivos(o).filter(it => it.etapa === "Mobilização" && pend.includes(it)).map(it => it.codigo).join(", ")}` : "");
   entregar(doc.output("blob"), `Checklist ${o.id} ${hoje()}.pdf`, texto); }
 
