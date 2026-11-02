@@ -280,7 +280,7 @@ const marcadoRev = r => r.rev === "corrigir" || r.rev === "corrigido";
 const emCorrecao = o => !enviado(o) && o.analise === "Devolvido" && itensCampo(o).some(it => marcadoRev(reg(o, it.codigo)));
 const travado = (o, it) => enviado(o) || (emCorrecao(o) && !marcadoRev(reg(o, it.codigo)));
 function etapaEnvio(o) {
-  if (o.analise === "Aprovado" && enviado(o)) return { t: "Aprovado pelo supervisor", c: "p-ok" };
+  if (o.analise === "Aprovado" && enviado(o)) return { t: "Validado pelo supervisor", c: "p-ok" };
   if (enviado(o)) return { t: "Enviado · em análise", c: "p-mob" };
   if (o.analise === "Devolvido") return { t: "Devolvido para correção", c: "p-bad" };
   return null; }
@@ -307,7 +307,7 @@ function telaObra(id) {
   const est = etapaEnvio(o);
   const aviso = enviado(o)
     ? h("div", { class: "notice " + (o.analise === "Aprovado" ? "ok" : ""), text: o.analise === "Aprovado"
-        ? `Checklist aprovado pelo supervisor em ${dataHora(o.analiseEm)}.` + (o.analiseObs ? " Comentário: " + o.analiseObs : "")
+        ? `Checklist validado pelo supervisor em ${dataHora(o.analiseEm)}.` + (o.analiseObs ? " Comentário: " + o.analiseObs : "")
         : `Checklist enviado ao supervisor em ${dataHora(o.enviadoCampo)}. Aguardando a análise. As respostas ficam só para leitura.` })
     : o.analise === "Devolvido" ? h("div", { class: "notice erro", text: "Devolvido para correção pelo supervisor" + (o.analiseObs ? ": " + o.analiseObs : ".") + " Corrija os itens na aba Corrigir e envie de novo." }) : null;
   const head = h("section", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
@@ -371,8 +371,8 @@ function telaEnviar(o, its, cats, r, numero) {
     lista(`${incompletos.length} item(ns) com Não sem quem resolve, prazo ou foto`, incompletos, "p-inc", it => "Falta: " + faltaNoNao(reg(o, it.codigo)).join(", ")),
     lista(`${naos.length} item(ns) marcados como Não`, naos.filter(i => !incompletos.includes(i)), "p-bad", it => { const g = reg(o, it.codigo); return [g.parte, g.prev ? "prazo " + fmt(g.prev) : "", g.obs].filter(Boolean).join(" · "); })];
   if (enviado(o)) {
-    kids.unshift(h("div", { class: "card env-ok" }, h("b", { text: o.analise === "Aprovado" ? "Checklist aprovado" : "Checklist enviado" }),
-      h("p", { class: "meta", style: "margin:0", text: `Enviado por ${o.enviadoPor || C.autor || "você"} em ${dataHora(o.enviadoCampo)}.` + (o.analise === "Aprovado" ? " Aprovado pelo supervisor em " + dataHora(o.analiseEm) + "." : " O supervisor vai analisar e, se precisar, devolve para correção.") }))); }
+    kids.unshift(h("div", { class: "card env-ok" }, h("b", { text: o.analise === "Aprovado" ? "Checklist validado" : "Checklist enviado" }),
+      h("p", { class: "meta", style: "margin:0", text: `Enviado por ${o.enviadoPor || C.autor || "você"} em ${dataHora(o.enviadoCampo)}.` + (o.analise === "Aprovado" ? " Validado pelo supervisor em " + dataHora(o.analiseEm) + "." : " O supervisor vai analisar e, se precisar, devolve para correção.") }))); }
   else {
     const pendLocal = Object.values(P.itens).some(p => p.obra === o.id);
     const bloqueio = aCorrigir.length ? "Corrija os itens devolvidos pelo supervisor para liberar o envio." : vazios.length ? "Responda todos os itens para liberar o envio."

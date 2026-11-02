@@ -58,6 +58,15 @@ svg text{fill:var(--muted);font-family:var(--font);font-size:11px}
 .rev-bts{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .rev-b{height:40px;font-size:13px}
 @media (max-width:640px){.rev-linha{grid-template-columns:1fr}}
+.resumo-aval{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:12px;border:2px solid var(--line);background:var(--surface)}
+.aval-nums{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13.5px;color:var(--muted)}
+.aval-nums b{font-size:20px;color:var(--fg);font-variant-numeric:tabular-nums}
+.check-validar{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:10px;cursor:pointer;border:2px solid var(--ok);background:var(--ok-bg)}
+.check-validar.devol{border-color:var(--bad);background:var(--bad-bg)}
+.check-validar.off{border-color:var(--line);background:var(--surface2);cursor:not-allowed;opacity:.8}
+.check-validar input{width:26px;height:26px;flex:none;margin:0;accent-color:var(--ok)}
+.check-validar.devol input{accent-color:var(--bad)}
+.check-validar b{font-size:15px}
 </style>
 </head>
 <body>
@@ -74,6 +83,6 @@ svg text{fill:var(--muted);font-family:var(--font);font-size:11px}
 <script src="../lib/xlsx.full.min.js"></script>
 <script src="../lib/jspdf.umd.min.js"></script>
 <script src="itens.js?v=1"></script>
-<script src="painel.js?v=14"></script>
+<script src="painel.js?v=16"></script>
 </body>
 </html>

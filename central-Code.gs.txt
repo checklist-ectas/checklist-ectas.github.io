@@ -323,7 +323,7 @@ function avisoDiario() {
   if (!perto.length && !vencidas.length) return;
   const fmt = d => d ? d.slice(8, 10) + "/" + d.slice(5, 7) + "/" + d.slice(0, 4) : "";
   const linhas = ["<b>Resumo do dia " + fmt(hoje) + "</b>"];
-  if (perto.length) linhas.push("Mobilizam nos próximos 7 dias sem checklist aprovado:<br>" + perto.map(o => "• " + nomeObra_(o) + " · mobilização " + fmt(o.previsaoMob) + " · " +
+  if (perto.length) linhas.push("Mobilizam nos próximos 7 dias sem checklist validado:<br>" + perto.map(o => "• " + nomeObra_(o) + " · mobilização " + fmt(o.previsaoMob) + " · " +
     (!o.liberadoCampo ? "aguardando autorização ao campo" : o.enviadoCampo ? "checklist aguardando análise" : o.analise === "Devolvido" ? "devolvido ao técnico" : "técnico preenchendo") + " (" + esc_(o.tecnico || "sem técnico") + ")").join("<br>"));
   if (vencidas.length) linhas.push("Pendências com prazo vencido: " + vencidas.length + "<br>" + vencidas.slice(0, 30).map(r => "• " + esc_(r.obra) + " " + esc_(r.cod) + " " + esc_(r.item) + " · " + esc_(r.parte || "sem responsável") + " · prazo " + fmt(r.prev)).join("<br>") + (vencidas.length > 30 ? "<br>…" : ""));
   email_(emailsSupervisores_(), "Checklist ECTAS · " + (perto.length ? perto.length + " obra(s) mobilizam em até 7 dias" : vencidas.length + " pendência(s) vencida(s)"), linhas, APP_SUPERVISOR);
@@ -378,7 +378,7 @@ function salvarObra_(n, sup) {
   const para = emailTecnico_(o.tecnico);
   if (autorizou) email_(para, "Obra liberada para o checklist: " + id, ["Olá, " + esc_(o.tecnico) + "!", "A obra " + nomeObra_(o) + " foi liberada para você preencher o checklist de pré-instalação.", "Entre no app com a sua senha de acesso."], APP_CAMPO);
   if (decidiu && n.analise === "Devolvido") email_(para, "Checklist devolvido para correção: " + id, ["Olá, " + esc_(o.tecnico) + "!", quem + " devolveu o checklist da obra " + nomeObra_(o) + " para correção.", o.analiseObs ? "Comentário: " + esc_(o.analiseObs) : "", "Abra a aba Corrigir no app, ajuste os itens marcados e envie de novo."].filter(Boolean), APP_CAMPO);
-  if (decidiu && n.analise === "Aprovado") email_(para, "Checklist aprovado: " + id, ["Olá, " + esc_(o.tecnico) + "!", quem + " aprovou o checklist da obra " + nomeObra_(o) + ".", o.analiseObs ? "Comentário: " + esc_(o.analiseObs) : ""].filter(Boolean), APP_CAMPO);
+  if (decidiu && n.analise === "Aprovado") email_(para, "Checklist validado: " + id, ["Olá, " + esc_(o.tecnico) + "!", quem + " validou o checklist da obra " + nomeObra_(o) + ". A obra está liberada para mobilização.", o.analiseObs ? "Comentário: " + esc_(o.analiseObs) : ""].filter(Boolean), APP_CAMPO);
   return { ok: true, id: id };
 }
 function limparCorrigidos_(obra) {
@@ -505,7 +505,7 @@ function enviarChecklist_(obraId, tecnico, minhas) {
   email_(emailsSupervisores_(), "Checklist preenchido para analisar: " + id, [
     esc_(tecnico) + " enviou o checklist da obra " + nomeObra_(o) + ".",
     (campo.length - nao - na) + " Sim · " + nao + " Não · " + na + " N/A.",
-    o.analise === "Devolvido" ? "É o reenvio depois da devolução para correção." : "", "Abra o painel para aprovar ou devolver."].filter(Boolean), APP_SUPERVISOR);
+    o.analise === "Devolvido" ? "É o reenvio depois da devolução para correção." : "", "Abra o painel para avaliar os itens e validar."].filter(Boolean), APP_SUPERVISOR);
   return { ok: true };
 }
 

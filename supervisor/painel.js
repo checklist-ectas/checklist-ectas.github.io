@@ -346,7 +346,7 @@ function campoResumo(o) { const its = itensAtivos().filter(i => !ehPlanejamento(
   const total = its.length - na; return { sim, nao, na, total, vazio: total - sim - nao }; }
 function statusCampo(o) {
   if (!planejamento(o).liberada) return { k: "bloq", t: "Aguardando autorização", c: "p-na" };
-  if (o.enviadoCampo && o.analise === "Aprovado") return { k: "aprov", t: "Aprovado", c: "p-ok" };
+  if (o.enviadoCampo && o.analise === "Aprovado") return { k: "aprov", t: "Validado", c: "p-ok" };
   if (o.enviadoCampo) return { k: "analisar", t: "Preenchido · analisar", c: "p-mob" };
   const q = campoResumo(o);
   if (o.analise === "Devolvido") return { k: "devol", t: `Devolvido ao técnico · ${q.sim + q.nao}/${q.total}`, c: "p-bad" };
@@ -357,7 +357,7 @@ const marcadosCorrigir = o => camposDoCampo().filter(i => reg(o, i.codigo).rev =
 async function analisar(o, decisao, obs) {
   const d = { id: o.id, analise: decisao, analiseEm: decisao ? new Date().toISOString() : "", analiseObs: obs || "" };
   if (decisao === "Devolvido") d.enviadoCampo = "";   // volta a ficar editável no app do técnico
-  const ok = await salvarObra(d, decisao === "Aprovado" ? "Checklist aprovado" : decisao === "Devolvido" ? "Checklist devolvido ao técnico para correção" : "Análise reaberta");
+  const ok = await salvarObra(d, decisao === "Aprovado" ? "Checklist validado: obra liberada para mobilização" : decisao === "Devolvido" ? "Checklist devolvido automaticamente ao técnico com os itens para corrigir" : "Validação desfeita: o checklist voltou para análise");
   if (ok && decisao === "Devolvido" && !CENTRAL.url) { UI.link = o.id; render(); }
 }
 function revControle(o, it) {   // Aceitar / Corrigir um item durante a análise
@@ -382,7 +382,7 @@ function blocoAnalise(o) {
       + `${o.tecnico || "O técnico"} está preenchendo. Quando ele tocar em “Enviar” no app, o checklist aparece aqui como preenchido para você analisar.` }));
     if (st.k === "devol" && marcados.length) kids.push(h("p", { class: "meta", style: "margin:0", text: "Itens devolvidos para corrigir: " + marcados.map(i => i.codigo).join(", ") })); }
   else {
-    kids.push(h("p", { class: "meta", style: "margin:0", text: `Enviado por ${o.enviadoPor || o.tecnico || "técnico"} em ${dataHora(o.enviadoCampo)}.` + (st.k === "aprov" ? ` Aprovado por ${o.analisePor || "supervisor"} em ${dataHora(o.analiseEm)}.` : "") }));
+    kids.push(h("p", { class: "meta", style: "margin:0", text: `Enviado por ${o.enviadoPor || o.tecnico || "técnico"} em ${dataHora(o.enviadoCampo)}.` + (st.k === "aprov" ? ` Validado por ${o.analisePor || "supervisor"} em ${dataHora(o.analiseEm)}.` : "") }));
     const linhaRev = it => { const g = reg(o, it.codigo);
       return h("div", { class: "rev-linha" },
         h("div", {}, h("b", { text: it.codigo + " " }), it.item,
@@ -391,18 +391,29 @@ function blocoAnalise(o) {
     if (corrigidos.length) kids.push(h("div", { class: "rev-box ok" }, h("b", { text: `${corrigidos.length} item(ns) corrigidos pelo técnico depois da devolução` }), corrigidos.map(linhaRev)));
     if (naos.length) kids.push(h("div", { class: "rev-box" }, h("b", { text: `${naos.length} item(ns) marcados como Não` }), naos.filter(i => !corrigidos.includes(i)).map(linhaRev)));
     if (st.k === "analisar") {
-      const obs = h("textarea", { id: "an-obs", placeholder: "Comentário geral para o técnico", style: "min-height:56px" });
-      const msg = h("span", { class: "meta" });
-      kids.push(h("p", { class: "meta", style: "margin:0", text: "Marque cada item como Aceitar ou Corrigir. Para pedir correção de um item com Sim ou N/A, use o botão Corrigir na tabela da obra, mais abaixo." }),
-        marcados.length ? h("div", { class: "notice erro", text: `${marcados.length} item(ns) marcados para corrigir: ${marcados.map(i => i.codigo).join(", ")}. Ao devolver, o técnico só poderá alterar esses itens.` }) : null,
-        h("label", { class: "f" }, "Comentário da análise", obs),
-        h("div", { class: "row" },
-          h("button", { class: "btn", style: "background:var(--ok)", onclick: () => { if (marcados.length) { msg.textContent = "Há itens marcados para corrigir: devolva ao técnico ou desmarque-os antes de aprovar."; return; } analisar(o, "Aprovado", obs.value.trim()); } }, "Aprovar checklist"),
-          h("button", { class: "btn sec", style: "color:var(--bad);border-color:var(--bad)", onclick: () => { if (!marcados.length && !obs.value.trim()) { msg.textContent = "Marque os itens para corrigir ou escreva o que o técnico precisa ajustar."; return; } analisar(o, "Devolvido", obs.value.trim()); } }, marcados.length ? `Devolver ${marcados.length} item(ns) para correção` : "Devolver ao técnico para correção"),
-          msg)); }
+      // resumo da avaliação: o check de validação muda a situação do checklist automaticamente
+      const avaliar = [...new Set([...naos, ...corrigidos])], semAval = avaliar.filter(i => !["aceito", "corrigir"].includes(reg(o, i.codigo).rev || ""));
+      const aceitos = avaliar.filter(i => reg(o, i.codigo).rev === "aceito").length;
+      const obs = h("textarea", { id: "an-obs", placeholder: marcados.length ? "Comentário geral para o técnico (opcional)" : "Comentário (opcional)", style: "min-height:52px" });
+      const destino = marcados.length ? `o checklist volta ao técnico só com ${marcados.length === 1 ? "o item" : "os " + marcados.length + " itens"} para corrigir (${marcados.map(i => i.codigo).join(", ")})`
+        : "o checklist passa para Validado e a obra fica liberada para mobilização";
+      const chk = h("input", { type: "checkbox", id: "an-validar", disabled: semAval.length ? true : null });
+      chk.onchange = () => { if (!chk.checked) return; chk.disabled = true; analisar(o, marcados.length ? "Devolvido" : "Aprovado", obs.value.trim()); };
+      kids.push(h("p", { class: "meta", style: "margin:0", text: "Avalie cada item com Não: Aceitar ou Corrigir. Para pedir correção de um item com Sim ou N/A, use o botão Corrigir na tabela da obra, mais abaixo." }),
+        h("div", { class: "resumo-aval" },
+          h("b", { text: "Resumo da avaliação" }),
+          h("div", { class: "aval-nums" },
+            h("span", {}, h("b", { text: q.sim + q.na }), " Sim / N/A"),
+            h("span", {}, h("b", { text: aceitos, style: "color:var(--ok)" }), " Não aceitos"),
+            h("span", {}, h("b", { text: marcados.length, style: marcados.length ? "color:var(--bad)" : "" }), " para corrigir"),
+            h("span", {}, h("b", { text: semAval.length, style: semAval.length ? "color:var(--warn)" : "" }), " sem avaliação")),
+          h("label", { class: "f" }, "Comentário", obs),
+          h("label", { class: "check-validar" + (semAval.length ? " off" : marcados.length ? " devol" : " ok"), for: "an-validar" }, chk,
+            h("span", {}, h("b", { text: "Validei as informações deste checklist" }),
+              h("span", { class: "meta", text: semAval.length ? ` Marque Aceitar ou Corrigir em ${semAval.length === 1 ? "1 item" : semAval.length + " itens"} (${semAval.map(i => i.codigo).join(", ")}) para liberar a validação.` : ` Ao marcar, ${destino}.` }))))); }
     else { if (o.analiseObs) kids.push(h("p", { class: "meta", style: "margin:0", text: "Comentário: " + o.analiseObs }));
       kids.push(h("div", { class: "row" }, h("button", { class: "btn", onclick: () => pdfLiberacao(o) }, "PDF de liberação para mobilização"),
-        h("button", { class: "more", onclick: () => analisar(o, "", "") }, "Reabrir análise"))); } }
+        h("button", { class: "more", onclick: () => analisar(o, "", "") }, "Desfazer validação"))); } }
   if (st.k !== "aprov") kids.push(h("button", { class: "more", style: "align-self:flex-start", onclick: () => pdfLiberacao(o) }, "Baixar PDF do checklist (prévia)"));
   return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:10px;border-width:2px;border-color:" + cor }, ...kids); }
 
@@ -538,12 +549,12 @@ async function pdfLiberacao(o) {
   // situação
   doc.setFillColor(...(aprovado ? [221, 243, 230] : [255, 240, 199])); doc.roundedRect(M, y - 4, W - 2 * M, 12, 2, 2, "F");
   doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(...(aprovado ? [30, 123, 74] : [138, 90, 0]));
-  doc.text(aprovado ? "CHECKLIST APROVADO · OBRA LIBERADA PARA MOBILIZAÇÃO" : "DOCUMENTO DE CONFERÊNCIA · CHECKLIST AINDA NÃO APROVADO", M + 4, y + 3.5); y += 14; doc.setTextColor(...TXT);
+  doc.text(aprovado ? "CHECKLIST VALIDADO · OBRA LIBERADA PARA MOBILIZAÇÃO" : "DOCUMENTO DE CONFERÊNCIA · CHECKLIST AINDA NÃO VALIDADO", M + 4, y + 3.5); y += 14; doc.setTextColor(...TXT);
   doc.setFontSize(9);
   const info = [["Obra", (o.id + " · " + (o.nome || ""))], ["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo / tipo de ETE", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
     ["Técnico de campo", o.tecnico], ["Previsão de mobilização", fmt(o.previsaoMob)], ["Autorizado ao campo", o.liberadoCampo ? dataHora(o.liberadoCampo) + (o.liberadoPor ? " por " + o.liberadoPor : "") : ""],
     ["Checklist enviado", o.enviadoCampo ? dataHora(o.enviadoCampo) + (o.enviadoPor ? " por " + o.enviadoPor : "") : "ainda não enviado"],
-    ["Análise", o.analise ? o.analise + " em " + dataHora(o.analiseEm) + (o.analisePor ? " por " + o.analisePor : "") : "pendente"], ["Comentário da análise", o.analiseObs],
+    ["Análise", o.analise ? (o.analise === "Aprovado" ? "Validado" : o.analise) + " em " + dataHora(o.analiseEm) + (o.analisePor ? " por " + o.analisePor : "") : "pendente"], ["Comentário da análise", o.analiseObs],
     ["Resultado", `${q.sim} Sim · ${q.nao} Não · ${q.na} N/A · ${q.vazio} sem resposta · Planejamento ${pl.ok}/${pl.total}`]];
   for (const [k, v] of info) { if (!v) continue; doc.setFont("helvetica", "bold"); doc.text(k + ":", M, y); doc.setFont("helvetica", "normal"); const t = doc.splitTextToSize(String(v), W - 2 * M - 46); quebra(t.length * 4.4); doc.text(t, M + 46, y); y += 4.4 * t.length; }
   y += 3;
@@ -574,7 +585,7 @@ async function pdfLiberacao(o) {
       } catch (e) { } }
     if (col) y += altLinha; }
   // assinatura do supervisor que analisou
-  if (aprovado) { quebra(24); y += 10; doc.setDrawColor(...CINZA); doc.line(M, y, M + 80, y); doc.setFontSize(8); doc.text((o.analisePor || "Supervisor") + " · ECTAS Saneamento", M, y + 4); doc.text("Aprovado em " + dataHora(o.analiseEm), M, y + 8); }
+  if (aprovado) { quebra(24); y += 10; doc.setDrawColor(...CINZA); doc.line(M, y, M + 80, y); doc.setFontSize(8); doc.text((o.analisePor || "Supervisor") + " · ECTAS Saneamento", M, y + 4); doc.text("Validado em " + dataHora(o.analiseEm), M, y + 8); }
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7); doc.setTextColor(...CINZA);
     doc.text("Gerado em " + new Date().toLocaleString("pt-BR") + ((D.eu && D.eu.nome) ? " por " + D.eu.nome : "") + " · ECTAS Saneamento", M, 292); doc.text(i + "/" + n, W - M, 292, { align: "right" }); }
@@ -655,7 +666,7 @@ function telaTecnicos() {
     h("div", { class: "full", style: "font-weight:700", text: "Cadastrar técnico de campo" }),
     h("label", { class: "f" }, "Nome", h("input", { id: "t-nome", required: true, autocomplete: "off" })),
     h("label", { class: "f" }, "Telefone (WhatsApp)", h("input", { id: "t-fone", inputmode: "tel", placeholder: "(47) 99999-0000" })),
-    h("label", { class: "f" }, "E-mail (avisos de obra liberada, devolvida e aprovada)", h("input", { id: "t-email", type: "email", autocomplete: "off" })),
+    h("label", { class: "f" }, "E-mail (avisos de obra liberada, devolvida e validada)", h("input", { id: "t-email", type: "email", autocomplete: "off" })),
     h("label", { class: "f" }, "Senha de acesso (digite ou use a sugerida, 4 a 8 números)", h("input", { id: "t-cod", required: true, inputmode: "numeric", value: novoCodigo(), maxlength: "8", autocomplete: "off" })),
     h("div", { class: "row", style: "align-items:flex-end" }, h("button", { class: "btn", type: "submit" }, "Cadastrar técnico"), msg));
   const linhas = tecnicos().map(t => { const n = Object.values(D.obras).filter(o => o.tecnico === t.nome && !encerrada(o)).length;
