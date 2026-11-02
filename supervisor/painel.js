@@ -45,8 +45,20 @@ const encerrada = o => ["Instalação concluída", "Cancelada"].includes(o.situa
 async function api(corpo) {
   const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...corpo, senha: SENHA }) });
   const j = await r.json(); if (!j.ok) { const e = new Error(j.erro || "erro"); e.senha = j.erro === "senha"; throw e; } return j; }
+async function subirLocais() {
+  if (D.fonte === "central" || D.migrado) return;
+  const tecs = D.tecnicos || [], obs = Object.values(D.obras || {});
+  if (!tecs.length && !obs.length) return;
+  toast("Enviando para a central as obras cadastradas neste navegador…");
+  for (const t of tecs) await api({ acao: "supSalvarTecnico", tecnico: t });
+  for (const o of obs) { const d = { ...o }; delete d.checklist; await api({ acao: "supSalvarObra", obra: d });
+    const mud = Object.entries(o.checklist || {}).filter(([, g]) => g && g.status).map(([cod, g]) => ({ obra: o.id, cod, dados: g }));
+    if (mud.length) await api({ acao: "supSalvarRespostas", mudancas: mud }); }
+  D.migrado = true; gravar("sup-dados", D);
+  toast(`${obs.length} obra(s) e ${tecs.length} técnico(s) enviados para a central.`); }
 async function carregarCentral() {
   UI.carregando = true; UI.erro = ""; render();
+  try { await subirLocais(); } catch (e) { if (e.senha) { SENHA = ""; gravar("sup-senha", ""); UI.erro = "Senha incorreta."; UI.carregando = false; render(); return; } }
   try { const r = await api({ acao: "supCarregar" }); const ob = {}; for (const o of r.obras || []) ob[o.id] = o;
     D = { obras: ob, itens: r.itens || [], tecnicos: r.tecnicos || [], fonte: "central", em: new Date().toISOString(), planilha: r.planilha || "" }; gravar("sup-dados", D);
   } catch (e) { if (e.senha) { SENHA = ""; gravar("sup-senha", ""); UI.erro = "Senha incorreta."; } else UI.erro = "Não foi possível falar com a central. Mostrando os últimos dados carregados."; }

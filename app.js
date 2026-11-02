@@ -64,12 +64,12 @@ function resumo(o) { let apl = 0, conc = 0, pendMob = 0, atras = 0;
 
 /* obra como o celular a vê: cópia da central + alterações locais ainda não enviadas */
 function obraView(id) {
-  const base = E.obras[id] || (LK[id] && LK[id]._cod === C.codigo ? LK[id] : null), loc = null;
+  const base = E.obras[id] || (!CENTRAL.url && LK[id] && LK[id]._cod === C.codigo ? LK[id] : null), loc = null;
   if (!base && !loc) return null;
   const o = { ...(base || {}), ...(loc || {}), id, checklist: { ...((base || {}).checklist || {}) } };
   for (const p of Object.values(P.itens)) if (p.obra === id) o.checklist[p.cod] = { ...(o.checklist[p.cod] || {}), ...p.dados };
   return o; }
-const minhaLK = () => Object.keys(LK).filter(id => LK[id]._cod === C.codigo);
+const minhaLK = () => CENTRAL.url ? [] : Object.keys(LK).filter(id => LK[id]._cod === C.codigo);
 const idsObras = () => [...new Set([...Object.keys(E.obras), ...minhaLK()])];
 const nPend = () => Object.keys(P.obras).length + Object.keys(P.itens).length;
 
@@ -122,6 +122,8 @@ async function sincronizar() {
     // 4. traz tudo da central
     const r = await api({ acao: "carregar" });
     const obras = {}; for (const o of r.obras || []) obras[o.id] = o;
+    const novas = Object.keys(obras).filter(id => E.ultimaSync && !E.obras[id]);
+    if (novas.length) toast(novas.length === 1 ? "Nova obra para você: " + novas[0] : novas.length + " obras novas para você");
     E = { obras, itens: (r.itens && r.itens.length) ? r.itens : E.itens, ultimaSync: new Date().toISOString(), planilha: r.planilha || "" }; salvarE();
     setSync("Sincronizado às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
     abrirObraUnica();
@@ -136,7 +138,7 @@ function trocarFoto(obra, cod, de, para) {
   salvarP(); }
 addEventListener("online", () => sincronizar());
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") sincronizar(); });
-setInterval(() => { if (nPend()) sincronizar(); }, 60000);
+setInterval(() => { if (nPend() || (CENTRAL.url && C.codigo && document.visibilityState === "visible")) sincronizar(); }, 60000);   // obras novas aparecem sozinhas
 
 /* ---------- navegação ---------- */
 function lerHash() { const x = decodeURIComponent(location.hash.slice(1));
@@ -233,7 +235,8 @@ function abrirObraUnica() {
   UI.abrirUnica = false; if (at.length === 1) ir("obra-" + at[0].id); }
 function telaLista() {
   if (UI.abrirUnica && obrasAtivas().length === 1) { abrirObraUnica(); return; }
-  topo("Checklist de Pré-Instalação", (C.autor ? C.autor + " · " : "") + "Minhas obras", null, [h("button", { onclick: () => ir("config") }, "Mais")]);
+  topo("Checklist de Pré-Instalação", (C.autor ? C.autor + " · " : "") + "Minhas obras", null,
+    [CENTRAL.url ? h("button", { onclick: () => sincronizar() }, UI.sinc ? "Atualizando…" : "Atualizar") : null, h("button", { onclick: () => ir("config") }, "Mais")].filter(Boolean));
   const kids = [avisoInstalar(),
     idsObras().length > 3 ? h("input", { class: "busca", id: "busca", type: "search", placeholder: "Buscar obra, cliente ou cidade", value: UI.busca, oninput: e => { UI.busca = e.target.value; desenharLista(); } }) : null,
     h("div", { id: "lista", style: "display:flex;flex-direction:column;gap:10px" })];
@@ -429,8 +432,7 @@ function telaConfig() {
   topo("Mais opções", C.autor || "", "");
   const kids = [
     h("div", { class: "card" }, h("b", { text: "Técnico" }), h("p", { class: "meta", style: "margin:4px 0 0", text: (C.autor || "") + " · você vê só as obras liberadas para você." })),
-    h("button", { class: "btn wa", onclick: () => exportarExcel(null) }, "Exportar minhas obras (Excel)"),
-    h("p", { class: "meta", text: "O Excel sai com as abas OBRAS e REGISTRO, para o supervisor importar no painel." })];
+    CENTRAL.url ? null : h("button", { class: "btn wa", onclick: () => exportarExcel(null) }, "Exportar minhas obras (Excel)")].filter(Boolean);
   if (CENTRAL.url) kids.push(h("div", { class: "card" }, h("b", { text: "Central" }),
       h("p", { class: "meta", text: E.ultimaSync ? "Última sincronização: " + new Date(E.ultimaSync).toLocaleString("pt-BR") : "Ainda não sincronizou." }),
       h("p", { class: "meta", text: nPend() ? nPend() + " alteração(ões) aguardando envio." : "Nada pendente neste celular." }),
