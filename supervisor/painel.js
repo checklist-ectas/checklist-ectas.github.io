@@ -102,6 +102,7 @@ function topo() {
   const ac = [];
   if (!CENTRAL.url || SENHA) ac.push(h("button", { class: "acao", onclick: () => { UI.form = "nova"; UI.obra = null; render(); scrollTo(0, 0); } }, "+ Nova obra"));
   if (CENTRAL.url && SENHA) ac.push(h("button", { class: "acao", onclick: carregarCentral }, UI.carregando ? "Atualizando…" : "Atualizar"));
+  if (CENTRAL.url && SENHA) ac.push(h("button", { class: "acao", onclick: () => { UI.obra = null; UI.form = null; UI.aba = "acesso"; render(); scrollTo(0, 0); setTimeout(() => { const i = $("#a-nova"); if (i) i.focus(); }, 50); } }, "Minha senha"));
   if (CENTRAL.url && SENHA) ac.push(h("button", { class: "acao", onclick: () => { SENHA = ""; gravar("sup-senha", ""); D = { obras: {}, itens: [], fonte: "" }; gravar("sup-dados", D); UI.obra = null; UI.form = null; render(); } }, "Sair"));
   if (D.fonte) ac.push(h("button", { class: "acao", onclick: exportar }, "Exportar Excel"));
   $("#acoes").replaceChildren(...ac); }
@@ -440,6 +441,18 @@ function telaPendencias() {
         h("td", { text: p.g.obs || "" }), h("td", { class: "n", text: (p.g.fotos || []).length || "" }), h("td", { text: p.o.tecnico || "" }))))))
       : h("p", { class: "vazio", text: todas.length ? "Nenhuma pendência neste filtro." : "Nenhuma pendência aberta. Os itens marcados como Não pelo técnico aparecem aqui." })); }
 
+/* campo para o supervisor digitar uma senha (de técnico ou de supervisor) */
+function definirSenha(chave, min, max, salvar) {
+  if (UI.editSenha !== chave) return h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => { UI.editSenha = chave; render(); setTimeout(() => { const i = $("#ds-inp"); if (i) i.focus(); }, 30); } }, "Definir senha");
+  const msg = h("span", { class: "meta", style: "color:var(--bad)" });
+  const inp = h("input", { id: "ds-inp", class: "busca", style: "padding:6px 8px;font-size:13px;width:130px", autocomplete: "off", placeholder: max ? `${min} a ${max} números` : `mín. ${min} caracteres`,
+    inputmode: max ? "numeric" : "text", maxlength: max ? String(max) : null });
+  const ok = async () => { const v = inp.value.trim();
+    if (max ? !new RegExp(`^\\d{${min},${max}}$`).test(v) : v.length < min) { msg.textContent = max ? `Use de ${min} a ${max} números.` : `Mínimo de ${min} caracteres.`; return; }
+    UI.editSenha = null; await salvar(v); };
+  inp.onkeydown = e => { if (e.key === "Enter") ok(); if (e.key === "Escape") { UI.editSenha = null; render(); } };
+  return h("span", { class: "row", style: "gap:6px" }, inp, h("button", { class: "btn", style: "padding:7px 10px;font-size:12px", onclick: ok }, "Salvar"),
+    h("button", { class: "more", onclick: () => { UI.editSenha = null; render(); } }, "Cancelar"), msg); }
 /* ---------- acesso: minha senha, supervisores e avisos por e-mail ---------- */
 function telaAcesso() {
   const eu = D.eu || { nome: "", admin: false };
@@ -457,30 +470,32 @@ function telaAcesso() {
     h("div", { class: "row full" }, h("button", { class: "btn", type: "submit" }, "Trocar minha senha"), m1),
     eu.mestre ? h("p", { class: "meta full", style: "margin:0", text: "Esta é a senha do administrador. Ela fica guardada nas configurações protegidas da central, fora do código." }) : null);
   const kids = [minha];
-  if (eu.admin) {
+  {
     const m2 = h("span", { class: "meta" });
     const novaSenhaSup = () => Math.random().toString(36).slice(2, 6) + "-" + String(1000 + Math.floor(Math.random() * 9000));
     const salvarSup = async (s, aviso) => { try { await api({ acao: "supSalvarSupervisor", supervisor: s }); toast(aviso); await carregarCentral(); return true; } catch (e) { UI.erro = e.message; render(); return false; } };
     const form = h("form", { class: "card form", onsubmit: async e => { e.preventDefault();
-        const s = { nome: $("#s-nome").value.trim(), email: $("#s-email").value.trim(), senha: $("#s-senha-n").value.trim(), admin: $("#s-admin").checked, ativo: true };
+        const s = { nome: $("#s-nome").value.trim(), email: $("#s-email").value.trim(), senha: $("#s-senha-n").value.trim(), admin: !!($("#s-admin") && $("#s-admin").checked), ativo: true };
+        if (s.senha.length < 6) { m2.textContent = "A senha precisa ter pelo menos 6 caracteres."; return; }
         m2.textContent = "Salvando…";
         if (await salvarSup(s, "Supervisor cadastrado. Envie a ele o usuário e a senha.")) m2.textContent = ""; else m2.textContent = UI.erro; } },
       h("div", { class: "full", style: "font-weight:700", text: "Cadastrar supervisor" }),
       h("label", { class: "f" }, "Nome", h("input", { id: "s-nome", required: true })),
       h("label", { class: "f" }, "E-mail (usuário e avisos)", h("input", { id: "s-email", type: "email", required: true, autocomplete: "off" })),
-      h("label", { class: "f" }, "Senha inicial (gerada)", h("input", { id: "s-senha-n", required: true, value: novaSenhaSup(), minlength: "6" })),
-      h("label", { class: "f", style: "flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13.5px" }, h("input", { id: "s-admin", type: "checkbox" }), "Pode cadastrar supervisores e mudar os avisos"),
+      h("label", { class: "f" }, "Senha (digite ou use a sugerida, mínimo 6)", h("input", { id: "s-senha-n", required: true, value: novaSenhaSup(), minlength: "6", autocomplete: "off" })),
+      eu.admin ? h("label", { class: "f", style: "flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13.5px" }, h("input", { id: "s-admin", type: "checkbox" }), "Administrador (muda os avisos por e-mail e as contas de administrador)") : h("span"),
       h("div", { class: "row full" }, h("button", { class: "btn", type: "submit" }, "Cadastrar supervisor"), m2));
     const sups = (D.supervisores || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
     kids.push(h("b", { text: "Supervisores" }),
-      h("p", { class: "meta", style: "margin:0", text: "Cada supervisor entra com o próprio e-mail e senha. O nome dele fica registrado em quem autorizou, devolveu ou aprovou cada obra. O acesso de administrador (usuário em branco) continua valendo." }),
+      h("p", { class: "meta", style: "margin:0", text: "Cadastre os supervisores e defina a senha de cada um. Eles entram com o próprio e-mail e senha e podem trocá-la depois em “Minha senha”. O nome fica registrado em quem autorizou, devolveu ou aprovou cada obra." }),
       form,
       sups.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Supervisor", "E-mail", "Perfil", ""].map(t => h("th", { text: t })))),
         h("tbody", {}, sups.map(s => h("tr", { style: s.ativo ? "" : "opacity:.55" }, h("td", {}, h("b", { text: s.nome })), h("td", { text: s.email }), h("td", { text: s.admin ? "Administrador" : "Supervisor" }),
-          h("td", {}, h("div", { class: "row" },
-            h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: async () => { const nova = novaSenhaSup(); if (await salvarSup({ ...s, nomeAntigo: s.nome, senha: nova }, "Nova senha de " + s.nome + ": " + nova)) { UI.senhaGerada = { nome: s.nome, senha: nova }; render(); } } }, "Gerar nova senha"),
+          h("td", {}, (s.admin && !eu.admin) ? h("span", { class: "meta", text: "só o administrador altera" }) : h("div", { class: "row" },
+            definirSenha("sup-" + s.nome, 6, null, async nova => { if (await salvarSup({ ...s, nomeAntigo: s.nome, senha: nova }, "Senha de " + s.nome + " definida")) { UI.senhaGerada = { nome: s.nome, senha: nova }; render(); } }),
             h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarSup({ ...s, nomeAntigo: s.nome, ativo: !s.ativo }, s.ativo ? "Supervisor desativado" : "Supervisor reativado") }, s.ativo ? "Desativar" : "Reativar")))))))) : null,
-      UI.senhaGerada ? h("div", { class: "notice ok", text: `Nova senha de ${UI.senhaGerada.nome}: ${UI.senhaGerada.senha} (anote e envie a ele; ela não aparece de novo).` }) : null);
+      UI.senhaGerada ? h("div", { class: "notice ok", text: `Nova senha de ${UI.senhaGerada.nome}: ${UI.senhaGerada.senha} (anote e envie a ele; ela não aparece de novo).` }) : null); }
+  if (eu.admin) {
     const m3 = h("span", { class: "meta" });
     kids.push(h("b", { text: "Avisos por e-mail" }),
       h("div", { class: "card", style: "display:flex;flex-direction:column;gap:10px" },
@@ -641,7 +656,7 @@ function telaTecnicos() {
     h("label", { class: "f" }, "Nome", h("input", { id: "t-nome", required: true, autocomplete: "off" })),
     h("label", { class: "f" }, "Telefone (WhatsApp)", h("input", { id: "t-fone", inputmode: "tel", placeholder: "(47) 99999-0000" })),
     h("label", { class: "f" }, "E-mail (avisos de obra liberada, devolvida e aprovada)", h("input", { id: "t-email", type: "email", autocomplete: "off" })),
-    h("label", { class: "f" }, "Senha de acesso (gerada)", h("input", { id: "t-cod", required: true, inputmode: "numeric", value: novoCodigo(), maxlength: "8" })),
+    h("label", { class: "f" }, "Senha de acesso (digite ou use a sugerida, 4 a 8 números)", h("input", { id: "t-cod", required: true, inputmode: "numeric", value: novoCodigo(), maxlength: "8", autocomplete: "off" })),
     h("div", { class: "row", style: "align-items:flex-end" }, h("button", { class: "btn", type: "submit" }, "Cadastrar técnico"), msg));
   const linhas = tecnicos().map(t => { const n = Object.values(D.obras).filter(o => o.tecnico === t.nome && !encerrada(o)).length;
     const txt = `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nSenha de acesso: ${t.codigo}\nNão compartilhe esta senha.`;
@@ -654,13 +669,14 @@ function telaTecnicos() {
       h("td", { class: "n" }, h("span", { class: "code", text: t.codigo })), h("td", { class: "n", text: n }),
       h("td", {}, h("div", { class: "row" },
         h("a", { class: "btn wa", style: "padding:7px 10px;font-size:12px", href: "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(txt), target: "_blank", rel: "noopener" }, "Enviar acesso"),
+        definirSenha("tec-" + t.nome, 4, 8, nova => salvarTecnico({ ...t, codigo: nova, nomeAntigo: t.nome }, "Senha de " + t.nome + " definida. Envie para o técnico.")),
         h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarTecnico({ ...t, codigo: novoCodigo(), nomeAntigo: t.nome }, "Nova senha gerada. Envie para o técnico.") }, "Gerar nova senha"),
         h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px", onclick: () => salvarTecnico({ ...t, ativo: t.ativo === false, nomeAntigo: t.nome }, t.ativo === false ? "Técnico reativado" : "Técnico desativado") }, t.ativo === false ? "Reativar" : "Desativar"),
         CENTRAL.url ? exc : null))); });
   return h("div", { style: "display:flex;flex-direction:column;gap:12px" },
     h("p", { class: "meta", style: "margin:0", text: "Cada técnico entra no app de campo com a senha dele e só vê as obras em que é o responsável. Também dá para cadastrar o responsável direto no cadastro da obra. Um técnico desativado perde o acesso." }),
     form,
-    linhas.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Técnico", "Telefone", "E-mail", "Senha", "Obras ativas", ""].map((t, i) => h("th", { class: i === 3 || i === 4 ? "n" : "", text: t })))), h("tbody", {}, linhas)))
+    linhas.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Técnico", "Telefone", "E-mail", "Senha atual", "Obras ativas", ""].map((t, i) => h("th", { class: i === 3 || i === 4 ? "n" : "", text: t })))), h("tbody", {}, linhas)))
       : h("p", { class: "vazio", text: "Nenhum técnico cadastrado ainda." })); }
 
 function blocoResponsavel(v) {
@@ -671,7 +687,7 @@ function blocoResponsavel(v) {
     h("label", { class: "f" }, "Nome do responsável", h("input", { id: "o-novoNome", name: "novoNome", autocomplete: "off" })),
     h("label", { class: "f" }, "Telefone (WhatsApp)", h("input", { id: "o-novoFone", name: "novoFone", inputmode: "tel", placeholder: "(47) 99999-0000" })),
     h("label", { class: "f" }, "E-mail (opcional)", h("input", { id: "o-novoEmail", name: "novoEmail", type: "email", autocomplete: "off" })),
-    h("label", { class: "f" }, "Senha de acesso (gerada)", h("input", { id: "o-novaSenha", name: "novaSenha", inputmode: "numeric", maxlength: "8", value: novoCodigo() })),
+    h("label", { class: "f" }, "Senha de acesso (digite ou use a sugerida, 4 a 8 números)", h("input", { id: "o-novaSenha", name: "novaSenha", inputmode: "numeric", maxlength: "8", value: novoCodigo(), autocomplete: "off" })),
     h("p", { class: "meta", style: "margin:0;align-self:end", text: "O técnico usa esta senha para entrar no app e abrir as obras vinculadas a ele." }));
   const sel = h("select", { id: "o-tecnico", name: "tecnico", required: true, onchange: e => { $("#novo-resp").style.display = e.target.value === "__novo" ? "grid" : "none"; } },
     h("option", { value: "" }, "Escolha o responsável"),

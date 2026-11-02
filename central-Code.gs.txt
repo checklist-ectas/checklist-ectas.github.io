@@ -215,7 +215,7 @@ function doPost(e) {
       if (b.acao === "supSalvarItens") return json_(salvarListaItens_(b.itens || []));
       if (b.acao === "supSalvarRespostas") return json_(salvarItens_(b.mudancas || [], sup.nome, null));
       if (b.acao === "supTrocarSenha") return json_(trocarSenha_(sup, b.nova));
-      if (b.acao === "supSalvarSupervisor") return json_(sup.admin ? salvarSupervisor_(b.supervisor || {}) : { ok: false, erro: "Só o administrador cadastra supervisores." });
+      if (b.acao === "supSalvarSupervisor") return json_(salvarSupervisor_(b.supervisor || {}, sup));
       if (b.acao === "supSalvarConfig") return json_(sup.admin ? salvarConfig_(b.config || {}) : { ok: false, erro: "Só o administrador muda os avisos." });
       if (b.acao === "supTestarEmail") return json_(testarEmail_(sup, b.para));
     } finally { lk.releaseLock(); }
@@ -259,17 +259,18 @@ function supervisor_(b) {
   return { nome: String(s.nome).trim(), email: String(s.email || "").trim(), admin: sim_(s.admin), _linha: s._linha, sal: s.sal };
 }
 function supervisores_() { return ler_(abaSup_(), COL_SUP).filter(x => x.nome).map(x => ({ nome: String(x.nome).trim(), email: x.email || "", ativo: ativo_(x.ativo), admin: sim_(x.admin) })); }
-function salvarSupervisor_(n) {
+function salvarSupervisor_(n, sup) {
   const nome = String(n.nome || "").trim(), email = String(n.email || "").trim();
   if (!nome) return { ok: false, erro: "Informe o nome do supervisor." };
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, erro: "E-mail inválido." };
   const sh = abaSup_(), lista = ler_(sh, COL_SUP);
   const velho = lista.filter(x => norm_(x.nome) === norm_(n.nomeAntigo || nome))[0];
+  if (sup && !sup.admin && ((velho && sim_(velho.admin)) || n.admin)) return { ok: false, erro: "Só o administrador mexe em contas de administrador." };
   if (lista.some(x => x !== velho && (norm_(x.nome) === norm_(nome) || (email && norm_(x.email) === norm_(email))))) return { ok: false, erro: "Já existe um supervisor com esse nome ou e-mail." };
   let sal = velho ? velho.sal : "", hash = velho ? velho.hash : "";
   if (n.senha) { if (String(n.senha).length < 6) return { ok: false, erro: "A senha precisa ter pelo menos 6 caracteres." }; sal = Utilities.getUuid(); hash = hash_(String(n.senha), sal); }
   if (!hash) return { ok: false, erro: "Defina uma senha para o novo supervisor." };
-  const linha = [nome, email, sal, hash, n.ativo === false ? "Não" : "Sim", n.admin ? "Sim" : "Não"];
+  const linha = [nome, email, sal, hash, n.ativo === false ? "Não" : "Sim", (sup && !sup.admin) ? "Não" : (n.admin ? "Sim" : "Não")];
   if (velho) sh.getRange(velho._linha, 1, 1, COL_SUP.length).setValues([linha]); else sh.appendRow(linha);
   return { ok: true };
 }
@@ -354,7 +355,8 @@ function carregar_(tecnico, sup) {
   if (tecnico === null) {
     out.tecnicos = tecnicos_(); out.planilha = planilha_().getUrl();
     if (sup) { out.eu = { nome: sup.nome, admin: sup.admin, mestre: !!sup.mestre };
-      if (sup.admin) { out.supervisores = supervisores_(); out.config = { avisoEmails: PropertiesService.getScriptProperties().getProperty("AVISO_EMAILS") || "" }; } }
+      out.supervisores = supervisores_();
+      if (sup.admin) out.config = { avisoEmails: PropertiesService.getScriptProperties().getProperty("AVISO_EMAILS") || "" }; }
   }
   return out;
 }
