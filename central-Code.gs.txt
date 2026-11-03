@@ -190,9 +190,17 @@ function tecnicoPorCodigo_(cod) {
   const t = tecnicos_().filter(x => x.ativo && x.codigo === cod)[0];
   return t || null;
 }
+// Obras da aba OBRAS, uma por ID: se a mesma obra estiver repetida, vale o último valor preenchido de cada coluna.
+function obrasJuntas_() {
+  const por = {}, ordem = [];
+  ler_(abaObras_(), COL_OBRAS).forEach(o => { if (!o.id) return;
+    if (!por[o.id]) { por[o.id] = Object.assign({}, o); ordem.push(o.id); return; }
+    COL_OBRAS.forEach(c => { if (o[c[0]] !== "" && o[c[0]] !== undefined) por[o.id][c[0]] = o[c[0]]; }); });
+  return ordem.map(id => por[id]);
+}
 function obrasDoTecnico_(nome) {
   const n = norm_(nome), ids = {};
-  ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id && norm_(o.tecnico) === n) ids[o.id] = true; });
+  obrasJuntas_().forEach(o => { if (norm_(o.tecnico) === n) ids[o.id] = true; });
   return ids;
 }
 
@@ -343,7 +351,7 @@ function testarEmail_(sup, para) {
 // Gatilho diário (instalado por instalarAvisos): obras perto da mobilização sem checklist aprovado e pendências vencidas.
 function avisoDiario() {
   const hoje = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd"), em7 = Utilities.formatDate(new Date(Date.now() + 7 * 864e5), TZ, "yyyy-MM-dd");
-  const obras = ler_(abaObras_(), COL_OBRAS).filter(o => o.id && !o.dataRealMob && ["Instalação concluída", "Cancelada"].indexOf(o.situacao) < 0);
+  const obras = obrasJuntas_().filter(o => !o.dataRealMob && ["Instalação concluída", "Cancelada"].indexOf(o.situacao) < 0);
   const perto = obras.filter(o => o.previsaoMob && o.previsaoMob >= hoje && o.previsaoMob <= em7 && !(o.enviadoCampo && o.analise === "Aprovado"));
   const ativas = {}; obras.forEach(o => ativas[o.id] = o);
   const vencidas = ler_(abaReg_(), COL_REG).filter(r => ativas[r.obra] && (r.status === "Pendente" || r.status === "Em andamento") && r.prev && r.prev < hoje);
@@ -367,7 +375,7 @@ function instalarAvisos() {
 // tecnico = null: tudo (supervisor). tecnico = nome: só as obras desse técnico.
 function carregar_(tecnico, sup) {
   const obras = {};
-  ler_(abaObras_(), COL_OBRAS).forEach(o => {
+  obrasJuntas_().forEach(o => {
     if (!o.id) return;
     if (tecnico !== null && norm_(o.tecnico) !== norm_(tecnico)) return;
     delete o._linha; o.checklist = {}; obras[o.id] = o;
@@ -491,7 +499,7 @@ function salvarItens_(mudancas, autor, minhas) {
   const cat = {}; itens_().forEach(i => cat[i.codigo] = i);
   const aceitas = [], ignoradas = [], recusadas = [];
   const doSupervisor = c => !cat[c] || cat[c].quem !== "Campo";   // planejamento e itens do cliente: só o supervisor
-  const info = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id) info[o.id] = o; });
+  const info = {}; obrasJuntas_().forEach(o => { info[o.id] = o; });
   const planejamentoOk = obra => !!(info[obra] && info[obra].liberadoCampo);   // campo liberado só depois da autorização do supervisor
   const enviadas = {}; Object.keys(info).forEach(id => { if (info[id].enviadoCampo) enviadas[id] = true; });
   const marcados = {};   // obra devolvida com itens marcados: o técnico só mexe neles
@@ -535,6 +543,7 @@ function salvarItens_(mudancas, autor, minhas) {
 function enviarChecklist_(obraId, tecnico, minhas) {
   const id = idObra_(obraId);
   if (!minhas[id]) return { ok: false, erro: "Obra de outro técnico." };
+  juntarRepetidas_(id);
   const sh = abaObras_(), o = ler_(sh, COL_OBRAS).filter(x => x.id === id)[0];
   if (!o || !o.liberadoCampo) return { ok: false, erro: "A obra ainda não foi autorizada para o campo." };
   if (o.enviadoCampo) return { ok: true, jaEnviado: true };
