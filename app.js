@@ -267,7 +267,11 @@ function desenharLista() {
 /* Planejamento é do supervisor: o campo só é liberado com todo o planejamento Sim ou Não se aplica */
 const semAc = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
 const ehPlanejamento = it => semAc(it.categoria) === "planejamento";
-const itensCampo = o => itensAtivos(o).filter(it => !ehPlanejamento(it));
+// O técnico confere só os itens de "Campo": planejamento, itens do cliente para a mobilização e materiais ficam com o supervisor.
+const quemConfere = it => { const q = semAc(it.quem);
+  if (q === "supervisor" || q === "cliente") return "Supervisor"; if (q === "campo" || q === "tecnico") return "Campo";
+  return (ehPlanejamento(it) || semAc(it.etapa || "Mobilização") === "mobilizacao" || semAc(it.categoria) === "materiais") ? "Supervisor" : "Campo"; };
+const itensCampo = o => itensAtivos(o).filter(it => quemConfere(it) === "Campo");
 function planejamento(o) { const its = itensAtivos(o).filter(ehPlanejamento);
   const ok = its.filter(it => ["Concluído", "Não aplicável"].includes(reg(o, it.codigo).status)).length;
   return { total: its.length, ok, liberada: !!o.liberadoCampo }; }   // liberada só com a autorização enviada pelo supervisor

@@ -168,7 +168,7 @@ function telaObras() {
       h("td", {}, h("span", { class: "code", text: o.id })), h("td", {}, h("b", { text: o.nome || "" }), h("div", { class: "meta", text: [o.cliente, o.cidade].filter(Boolean).join(" · ") })),
       h("td", {}, o.tecnico ? o.tecnico : h("span", { class: "pill p-bad", text: "sem técnico" })), h("td", { class: "n", text: o.dataRealMob ? "✓ " + fmt(o.dataRealMob) : fmt(o.previsaoMob) }),
       h("td", { class: "n", text: falta == null ? "" : (falta >= 0 ? falta + "d" : (-falta) + "d atrás"), style: falta != null && falta <= 7 && r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
-      (() => { const pl = planejamento(o); return h("td", {}, h("span", { class: "pill " + (pl.liberada ? "p-ok" : pl.completo ? "p-mob" : "p-warn"), text: pl.liberada ? "Autorizado ao campo" : pl.completo ? "Pronto p/ autorizar" : `Planej. ${pl.ok}/${pl.total}` })); })(),
+      (() => { const pl = planejamento(o); return h("td", {}, h("span", { class: "pill " + (pl.liberada ? "p-ok" : pl.completo ? "p-mob" : "p-warn"), text: pl.liberada ? "Autorizado ao campo" : pl.completo ? "Pronto p/ autorizar" : `Supervisor ${pl.ok}/${pl.total}` })); })(),
       (() => { const st = statusCampo(o); return h("td", {}, st.k === "bloq" ? h("span", { class: "meta", text: "—" }) : h("span", { class: "pill " + st.c, text: st.t })); })(),
       h("td", { class: "n" }, pct(r.pct), h("span", { class: "mini" }, h("i", { style: "width:" + pct(r.pct) }))),
       h("td", { class: "n", text: r.pendMob, style: r.pendMob ? "color:var(--bad);font-weight:700" : "" }),
@@ -179,17 +179,17 @@ function telaObras() {
         oninput: e => { UI.busca = e.target.value; const pos = e.target.selectionStart; render(); const b = $("#busca"); b.focus(); b.setSelectionRange(pos, pos); } }),
       h("div", { class: "chips" }, [["ativas", "Ativas"], ["analisar", "Para analisar"], ["naolib", "Não liberadas"], ["lib", "Liberadas"], ["mob", "Mobilizadas"], ["atras", "Com atraso"], ["todas", "Todas"]].map(([k, t]) =>
         h("button", { class: "chip", "aria-pressed": String(UI.filtro === k), onclick: () => { UI.filtro = k; render(); } }, t)))),
-    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Técnico (campo)", "Mobilização", "Faltam", "Planejamento", "Checklist do campo", "Conferido", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: (i >= 3 && i <= 4) || (i >= 7 && i <= 9) ? "n" : "", text: t })))),
+    lista.length ? h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["ID", "Obra", "Técnico (campo)", "Mobilização", "Faltam", "Supervisor", "Checklist do campo", "Conferido", "Pend. mobil.", "Atrasados", "Liberação"].map((t, i) => h("th", { class: (i >= 3 && i <= 4) || (i >= 7 && i <= 9) ? "n" : "", text: t })))),
       h("tbody", {}, linhas))) : h("p", { class: "vazio", text: "Nenhuma obra neste filtro." })); }
 
 function telaObra(o) {
-  const r = resumo(o); const cats = [...new Set(itensAtivos().filter(i => !ehPlanejamento(i)).map(i => i.categoria))];
+  const r = resumo(o); const cats = [...new Set(camposDoCampo().map(i => i.categoria))];
   const info = [["Técnico responsável (campo)", o.tecnico || "não definido"], ["Cliente", o.cliente], ["Cidade/UF", o.cidade], ["Modelo", o.modelo], ["Responsável ECTAS", o.respEctas], ["Contato do cliente", [o.contato, o.telefone].filter(Boolean).join(" · ")],
     ["Data da verificação", fmt(o.dataVerificacao)], ["Previsão de mobilização", fmt(o.previsaoMob)], ["Mobilização real", fmt(o.dataRealMob)], ["Situação", o.situacao], ["Observações", o.obs]].filter(x => x[1]);
   const corpo = [];
   const emAnalise = statusCampo(o).k === "analisar";
   for (const c of cats) { corpo.push(h("tr", {}, h("td", { colspan: "8", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c })));
-    for (const it of itensAtivos().filter(i => i.categoria === c)) { const g = reg(o, it.codigo), s = g.status || "Pendente", sp = situacaoPrazo(g);
+    for (const it of camposDoCampo().filter(i => i.categoria === c)) { const g = reg(o, it.codigo), s = g.status || "Pendente", sp = situacaoPrazo(g);
       const cls = { "Concluído": "p-ok", "Em andamento": "p-bad", "Pendente": "p-bad", "Não aplicável": "p-na" }[g.status || ""] || "p-warn";
       const fotos = (g.fotos || []).filter(f => String(f).startsWith("d:"));
       const thumbs = fotos.length && D.fonte === "central" ? h("div", { class: "thumbs" }, fotos.map(f => { const ph = h("div", { class: "ph", text: "foto" }); carregarFoto(f.slice(2), ph); return ph; })) : null;
@@ -199,7 +199,7 @@ function telaObra(o) {
         h("td", { class: "n", text: fmt(g.concl) }),
         h("td", {}, g.obs || "", g.link ? h("div", {}, h("a", { href: g.link, target: "_blank", rel: "noopener", text: "evidência" })) : null, thumbs,
           g.por ? h("div", { class: "meta", text: "por " + g.por + (g.em ? " em " + new Date(g.em).toLocaleDateString("pt-BR") : "") }) : null),
-        h("td", {}, emAnalise && !ehPlanejamento(it) ? h("button", { class: "btn sec", style: "padding:6px 10px;font-size:12px" + (g.rev === "corrigir" ? ";background:var(--bad);color:#fff;border-color:var(--bad)" : ""),
+        h("td", {}, emAnalise ? h("button", { class: "btn sec", style: "padding:6px 10px;font-size:12px" + (g.rev === "corrigir" ? ";background:var(--bad);color:#fff;border-color:var(--bad)" : ""),
             onclick: () => salvarResposta(o, it.codigo, { rev: g.rev === "corrigir" ? "" : "corrigir", revObs: g.rev === "corrigir" ? "" : g.revObs || "" }) }, g.rev === "corrigir" ? "Corrigir ✓" : "Corrigir")
           : g.rev ? h("span", { class: "pill " + (g.rev === "aceito" || g.rev === "corrigido" ? "p-ok" : "p-bad"), text: { aceito: "Aceito", corrigir: "Corrigir", corrigido: "Corrigido" }[g.rev] }) : null))); } }
   return h("div", { style: "display:flex;flex-direction:column;gap:14px" },
@@ -217,7 +217,7 @@ function telaObra(o) {
       h("div", { class: "prog" }, h("i", { style: "width:" + pct(r.pct) })),
       h("div", { class: "stats" }, [[pct(r.pct), "Conferido"], [r.conc + "/" + r.apl, "Itens"], [r.pendMob, "P/ mobilizar"], [r.atras, "Atrasados"]].map(([v, t]) => h("div", { class: "stat" }, h("b", { text: v }), h("span", { text: t })))),
       h("dl", { class: "det" }, info.map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v }))))),
-    h("b", { text: planejamento(o).liberada ? "Checklist do campo" : "Checklist do campo (bloqueado até a autorização do supervisor)" }),
+    h("b", { text: (planejamento(o).liberada ? "Checklist do campo (conferido pelo técnico)" : "Checklist do campo (bloqueado até a autorização do supervisor)") + ` · ${camposDoCampo().length} itens` }),
     h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Cód.", "Item", "Status", "Quem resolve", "Prazo", "Conclusão", "Observações / evidências", "Análise"].map((t, i) => h("th", { class: i === 4 || i === 5 ? "n" : "", text: t })))), h("tbody", {}, corpo)))); }
 
 const cacheFoto = {};
@@ -292,8 +292,16 @@ function ITENS_BASE() { return (window.ITENS_CAMPO || []).map(r => ({ codigo: r[
 const semAc = t => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
 const ehPlanejamento = it => semAc(it.categoria) === "planejamento";
 const itensPlanejamento = () => itensAtivos().filter(ehPlanejamento);
+// Quem confere: Supervisor (planejamento, itens do cliente para a mobilização e materiais) ou Campo (técnico)
+const quemConfere = it => { const q = semAc(it.quem);
+  if (q === "supervisor" || q === "cliente") return "Supervisor"; if (q === "campo" || q === "tecnico") return "Campo";
+  return (ehPlanejamento(it) || semAc(it.etapa || "Mobilização") === "mobilizacao" || semAc(it.categoria) === "materiais") ? "Supervisor" : "Campo"; };
+const ehDoCampo = it => quemConfere(it) === "Campo";
+const itensCliente = () => itensAtivos().filter(it => !ehPlanejamento(it) && !ehDoCampo(it));   // confirmados pelo supervisor com o cliente
+const ehMob = it => semAc(it.etapa || "Mobilização") === "mobilizacao";
 const PLAN_OK = ["Concluído", "Não aplicável"];
-function planejamento(o) { const its = itensPlanejamento(); const ok = its.filter(it => PLAN_OK.includes(reg(o, it.codigo).status)).length;
+// para autorizar a mobilização: planejamento + itens do cliente com etapa Mobilização, todos Sim ou N/A
+function planejamento(o) { const its = [...itensPlanejamento(), ...itensCliente().filter(ehMob)]; const ok = its.filter(it => PLAN_OK.includes(reg(o, it.codigo).status)).length;
   return { total: its.length, ok, completo: ok === its.length, liberada: !!o.liberadoCampo }; }
 async function salvarResposta(o, cod, patch) {
   const atual = reg(o, cod);
@@ -303,8 +311,8 @@ async function salvarResposta(o, cod, patch) {
   const antes = planejamento(o).completo;
   o.checklist = { ...(o.checklist || {}), [cod]: dados }; D.obras[o.id] = o; gravar("sup-dados", D);
   const p = planejamento(o);
-  if (p.completo && !antes && !p.liberada) toast("Planejamento completo. Agora clique em “Enviar autorização para o campo”.");
-  if (!p.completo && p.liberada) toast("Atenção: a obra já está autorizada para o campo. Se o planejamento mudou, cancele a autorização.");
+  if (p.completo && !antes && !p.liberada) toast("Planejamento e itens do cliente confirmados. Agora clique em “Enviar autorização para o campo”.");
+  if (!p.completo && p.liberada) toast("Atenção: a obra já está autorizada para o campo. Se algo mudou, cancele a autorização.");
   render();
   if (CENTRAL.url) { try { await api({ acao: "supSalvarRespostas", mudancas: [{ obra: o.id, cod, dados }] }); }
     catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : "Sem conexão com a central: a resposta não foi salva. Tente de novo."; render(); } } }
@@ -314,33 +322,42 @@ async function autorizarCampo(o, sim) {
   if (ok && sim && !CENTRAL.url) { UI.link = o.id; render(); }   // sem a central, o técnico recebe a obra pelo link
 }
 function blocoPlanejamento(o) {
-  const its = itensPlanejamento(); if (!its.length) return null;
+  const its = itensPlanejamento(), cli = itensCliente(); if (!its.length && !cli.length) return null;
   const p = planejamento(o);
-  const linha = it => { const g = reg(o, it.codigo), s = g.status || "";
+  const linha = (it, rotulos) => { const g = reg(o, it.codigo), s = g.status || "";
+    const parteNao = semAc(it.categoria) === "materiais" || ehPlanejamento(it) ? "ECTAS" : "Cliente";
     const bt = (v, txt, cor) => h("button", { class: "ck-b", style: s === v ? `background:var(--${cor});border-color:var(--${cor});color:#fff` : "", "aria-pressed": String(s === v),
-      onclick: () => salvarResposta(o, it.codigo, s === v ? { status: "" } : { status: v, concl: v === "Concluído" ? (g.concl || hoje()) : (v === "Não aplicável" ? "" : g.concl || "") }) }, txt);
+      onclick: () => salvarResposta(o, it.codigo, s === v ? { status: "" } : { status: v, concl: v === "Concluído" ? (g.concl || hoje()) : (v === "Não aplicável" ? "" : g.concl || ""), ...(v === "Pendente" && !g.parte ? { parte: parteNao } : {}) }) }, txt);
     const data = (k, lbl) => h("label", { class: "pl-data" }, h("span", { text: lbl }),
       h("input", { type: "date", value: g[k] || "", id: "pl-" + k + "-" + it.codigo, onchange: e => salvarResposta(o, it.codigo, { [k]: e.target.value }) }));
     const atras = s !== "Concluído" && s !== "Não aplicável" && g.prev && g.prev < hoje();
     return h("div", { class: "pl-linha" + (atras ? " pl-atras" : "") },
-      h("div", { class: "ck-txt" }, h("span", { class: "ck-item", text: it.item }),
-        h("input", { class: "busca", style: "padding:6px 10px;font-size:13px;margin-top:4px", placeholder: "Observação (opcional)", value: g.obs || "", onchange: e => salvarResposta(o, it.codigo, { obs: e.target.value }) })),
-      data("prev", "Data planejada"), data("concl", "Data executada"),
+      h("div", { class: "ck-txt" }, h("span", { class: "ck-item" }, rotulos.cod ? h("b", { class: "ck-n", text: it.codigo + " " }) : null, it.item,
+          rotulos.cod && !ehMob(it) ? h("span", { class: "meta", text: " · até " + it.etapa }) : null),
+        h("input", { class: "busca", style: "padding:6px 10px;font-size:13px;margin-top:4px", placeholder: rotulos.obs, value: g.obs || "", onchange: e => salvarResposta(o, it.codigo, { obs: e.target.value }) })),
+      data("prev", rotulos.prev), data("concl", rotulos.concl),
       h("div", { class: "pl-bts" }, bt("Concluído", "Sim", "ok"), bt("Pendente", "Não", "bad"), bt("Não aplicável", "N/A", "na"))); };
+  const RP = { prev: "Data planejada", concl: "Data executada", obs: "Observação (opcional)" };
+  const RC = { cod: true, prev: "Prazo", concl: "Confirmado em", obs: "Observação / quem confirmou / evidência" };
+  const okDe = arr => arr.filter(it => PLAN_OK.includes(reg(o, it.codigo).status)).length;
+  const secao = (titulo, sub, arr, rot) => arr.length ? [h("div", { class: "pl-sec" }, h("b", { text: titulo }), h("span", { class: "meta", text: sub }), h("span", { class: "grow" }), h("span", { class: "pill " + (okDe(arr) === arr.length ? "p-ok" : "p-warn"), text: `${okDe(arr)}/${arr.length}` })),
+    ...[...new Set(arr.map(i => i.categoria))].flatMap(c => [rot.cod ? h("div", { class: "pl-cat", text: c }) : null, ...arr.filter(i => i.categoria === c).map(it => linha(it, rot))]).filter(Boolean)] : [];
+  const linhasTodas = [...secao("Planejamento", "interno ECTAS", its, RP),
+    ...secao("Confirmação com o cliente e materiais", "conferidos pelo supervisor; o técnico não confere estes itens", cli, RC)];
   const rodape = p.liberada
     ? h("div", { class: "pl-rodape ok" }, h("b", { text: "✓ Autorização enviada ao campo em " + new Date(o.liberadoCampo).toLocaleString("pt-BR") }),
         h("span", { class: "meta", text: `${o.tecnico || "O técnico"} já pode preencher o checklist desta obra.` }),
         h("button", { class: "more", onclick: () => autorizarCampo(o, false) }, "Cancelar autorização"))
     : h("div", { class: "pl-rodape" },
-        h("span", { class: "meta", text: p.completo ? "Planejamento completo. Envie a autorização para liberar o checklist ao técnico." : `Faltam ${p.total - p.ok} item(ns) com Sim ou N/A para liberar o envio.` }),
+        h("span", { class: "meta", text: p.completo ? "Planejamento e itens do cliente para a mobilização confirmados. Envie a autorização para liberar a equipe." : `Faltam ${p.total - p.ok} item(ns) de planejamento ou do cliente (etapa Mobilização) com Sim ou N/A para liberar o envio.` }),
         h("button", { class: "btn", disabled: !p.completo || null, onclick: () => autorizarCampo(o, true) }, "Enviar autorização para o campo"));
   return h("div", { class: "card ck", style: "border-color:" + (p.liberada ? "var(--ok)" : "var(--warn)") },
-    h("div", { class: "row", style: "padding:10px 0" }, h("b", { text: "Planejamento (preenchido pelo supervisor)" }), h("span", { class: "grow" }),
+    h("div", { class: "row", style: "padding:10px 0" }, h("b", { text: "Supervisor: planejamento e confirmação com o cliente" }), h("span", { class: "grow" }),
       h("span", { class: "pill " + (p.liberada ? "p-ok" : p.completo ? "p-mob" : "p-warn"), text: p.liberada ? "Autorizado para o campo" : p.completo ? "Pronto para autorizar" : `${p.ok} de ${p.total} · campo bloqueado` })),
-    its.map(linha), rodape); }
+    linhasTodas, rodape); }
 
 /* ---------- checklist enviado pelo técnico: análise do supervisor, item a item ---------- */
-function campoResumo(o) { const its = itensAtivos().filter(i => !ehPlanejamento(i)); let sim = 0, nao = 0, na = 0;
+function campoResumo(o) { const its = itensAtivos().filter(ehDoCampo); let sim = 0, nao = 0, na = 0;
   for (const it of its) { const s = reg(o, it.codigo).status || ""; if (s === "Concluído") sim++; else if (s === "Não aplicável") na++; else if (s) nao++; }
   const total = its.length - na; return { sim, nao, na, total, vazio: total - sim - nao }; }
 function statusCampo(o) {
@@ -351,7 +368,7 @@ function statusCampo(o) {
   if (o.analise === "Devolvido") return { k: "devol", t: `Devolvido ao técnico · ${q.sim + q.nao}/${q.total}`, c: "p-bad" };
   return { k: "preench", t: `Em preenchimento ${q.sim + q.nao}/${q.total}`, c: "p-warn" }; }
 const dataHora = t => t ? new Date(t).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-const camposDoCampo = () => itensAtivos().filter(i => !ehPlanejamento(i));
+const camposDoCampo = () => itensAtivos().filter(ehDoCampo);
 const marcadosCorrigir = o => camposDoCampo().filter(i => reg(o, i.codigo).rev === "corrigir");
 async function analisar(o, decisao, obs) {
   const d = { id: o.id, analise: decisao, analiseEm: decisao ? new Date().toISOString() : "", analiseObs: obs || "" };
@@ -420,7 +437,7 @@ function blocoAnalise(o) {
 function pendencias() { const out = [];
   for (const o of obras()) { if (encerrada(o)) continue;
     for (const it of itensAtivos()) { const g = reg(o, it.codigo); if (g.status !== "Pendente" && g.status !== "Em andamento") continue;
-      if (!ehPlanejamento(it) && !planejamento(o).liberada) continue;
+      if (ehDoCampo(it) && !planejamento(o).liberada) continue;
       out.push({ o, it, g, venc: !!(g.prev && g.prev < hoje()) }); } }
   return out.sort((a, b) => (a.g.prev || "9999").localeCompare(b.g.prev || "9999")); }
 function telaPendencias() {
@@ -554,7 +571,7 @@ async function pdfLiberacao(o) {
     ["Técnico de campo", o.tecnico], ["Previsão de mobilização", fmt(o.previsaoMob)], ["Autorizado ao campo", o.liberadoCampo ? dataHora(o.liberadoCampo) + (o.liberadoPor ? " por " + o.liberadoPor : "") : ""],
     ["Checklist enviado", o.enviadoCampo ? dataHora(o.enviadoCampo) + (o.enviadoPor ? " por " + o.enviadoPor : "") : "ainda não enviado"],
     ["Análise", o.analise ? (o.analise === "Aprovado" ? "Validado" : o.analise) + " em " + dataHora(o.analiseEm) + (o.analisePor ? " por " + o.analisePor : "") : "pendente"], ["Comentário da análise", o.analiseObs],
-    ["Resultado", `${q.sim} Sim · ${q.nao} Não · ${q.na} N/A · ${q.vazio} sem resposta · Planejamento ${pl.ok}/${pl.total}`]];
+    ["Resultado", `Campo: ${q.sim} Sim · ${q.nao} Não · ${q.na} N/A · ${q.vazio} sem resposta · Supervisor (planejamento e cliente p/ mobilização): ${pl.ok}/${pl.total}`]];
   for (const [k, v] of info) { if (!v) continue; doc.setFont("helvetica", "bold"); doc.text(k + ":", M, y); doc.setFont("helvetica", "normal"); const t = doc.splitTextToSize(String(v), W - 2 * M - 46); quebra(t.length * 4.4); doc.text(t, M + 46, y); y += 4.4 * t.length; }
   y += 3;
   const pend = pendencias().filter(p => p.o.id === o.id);
@@ -563,7 +580,10 @@ async function pdfLiberacao(o) {
   const plan = itensPlanejamento();
   if (plan.length) { titulo("Planejamento (supervisor)");
     tabela([["Cód.", 15], ["Item", 76], ["Resp.", 13], ["Planejada", 19], ["Executada", 19], ["Observação", W - 2 * M - 142]], plan.map(it => { const g = reg(o, it.codigo); return [it.codigo, it.item, rot(g.status), fmt(g.prev), fmt(g.concl), g.obs || ""]; }), [2, corResp]); }
-  titulo("Checklist do campo");
+  const cliPdf = itensCliente();
+  if (cliPdf.length) { titulo("Confirmação com o cliente (supervisor)");
+    tabela([["Cód.", 15], ["Item", 76], ["Resp.", 13], ["Prazo", 19], ["Confirmado", 19], ["Observação", W - 2 * M - 142]], cliPdf.map(it => { const g = reg(o, it.codigo); return [it.codigo, it.item, rot(g.status), fmt(g.prev), fmt(g.concl), g.obs || ""]; }), [2, corResp]); }
+  titulo("Checklist do campo (técnico)");
   const cats = [...new Set(camposDoCampo().map(i => i.categoria))];
   for (const c of cats) { quebra(14); doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...NAVY); doc.text(c, M, y); y += 4.5; doc.setTextColor(...TXT);
     tabela([["Cód.", 15], ["Item", 92], ["Resp.", 13], ["Observação", W - 2 * M - 120]], camposDoCampo().filter(i => i.categoria === c).map(it => { const g = reg(o, it.codigo);
@@ -603,7 +623,7 @@ function lerItensDaPlanilha(wb) {
     const iItem = r.findIndex(c => /^item/.test(c) || /verifica/.test(c));
     if (iItem >= 0 && r.some(c => /^cod/.test(c) || /^categ/.test(c))) {
       cab = i; col = { item: iItem, codigo: r.findIndex(c => /^cod/.test(c)), categoria: r.findIndex(c => /^categ/.test(c)),
-        etapa: r.findIndex(c => /etapa/.test(c)), referencia: r.findIndex(c => /refer/.test(c)), ativo: r.findIndex(c => /^ativo/.test(c)) }; } }
+        etapa: r.findIndex(c => /etapa/.test(c)), referencia: r.findIndex(c => /refer/.test(c)), ativo: r.findIndex(c => /^ativo/.test(c)), quem: r.findIndex(c => /quem|confere/.test(c)) }; } }
   if (cab < 0) throw new Error(`Não achei o cabeçalho na aba "${aba}". A aba precisa ter as colunas Código, Categoria e Item de verificação.`);
   const pega = (r, k) => col[k] >= 0 ? String(r[col[k]] ?? "").trim() : "";
   const lista = [], vistos = new Set(); let n = 0;
@@ -612,7 +632,7 @@ function lerItensDaPlanilha(wb) {
     let codigo = pega(r, "codigo").toUpperCase().replace(/\s+/g, "-"); if (!codigo || vistos.has(codigo)) codigo = "IT-" + String(++n).padStart(2, "0");
     vistos.add(codigo);
     const etapa = ETAPAS.find(e => sem(e) === sem(pega(r, "etapa"))) || "Mobilização";
-    lista.push({ codigo, categoria: pega(r, "categoria") || "Geral", item, etapa, referencia: pega(r, "referencia"), ativo: !/^n(ã|a)o$/i.test(pega(r, "ativo")) }); }
+    lista.push({ codigo, categoria: pega(r, "categoria") || "Geral", item, etapa, referencia: pega(r, "referencia"), ativo: !/^n(ã|a)o$/i.test(pega(r, "ativo")), quem: pega(r, "quem") }); }
   if (!lista.length) throw new Error(`A aba "${aba}" não tem itens abaixo do cabeçalho.`);
   return { aba, lista }; }
 async function importarItens(f) {
@@ -624,19 +644,30 @@ async function importarItens(f) {
     else { D.itens = lista; D.itensOrigem = `${f.name} (aba ${aba}) em ${new Date().toLocaleString("pt-BR")}`; if (!D.fonte) D.fonte = "arquivos"; gravar("sup-dados", D); }
     toast(`${ativos} itens carregados da planilha.`); render();
   } catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : (e.message || "Não foi possível ler a planilha."); render(); } }
+async function trocarQuem(it) {
+  const novo = quemConfere(it) === "Campo" ? "Supervisor" : "Campo";
+  const lista = (D.itens && D.itens.length ? D.itens : ITENS_BASE()).map(i => ({ ...i, quem: i.codigo === it.codigo ? novo : quemConfere(i) }));
+  if (CENTRAL.url) { try { await api({ acao: "supSalvarItens", itens: lista }); toast(`${it.codigo} agora é conferido ${novo === "Campo" ? "pelo técnico em campo" : "pelo supervisor com o cliente"}`); await carregarCentral(); }
+    catch (e) { UI.erro = e.senha ? "Senha do supervisor incorreta." : "Sem conexão com a central."; render(); } }
+  else { D.itens = lista; gravar("sup-dados", D); render(); } }
 function telaItens() {
   const its = itensAtivos(), cats = [...new Set(its.map(i => i.categoria))];
   const inp = h("input", { type: "file", id: "imp-itens", accept: ".xlsx,.xls", hidden: true, onchange: e => { const f = e.target.files[0]; e.target.value = ""; if (f) importarItens(f); } });
   return h("div", { style: "display:flex;flex-direction:column;gap:12px" },
     h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px" },
       h("b", { text: "Itens da lista de checagem" }),
-      h("p", { class: "meta", style: "margin:0", text: "A equipe de campo responde Sim ou Não para cada item desta lista. Para mudar os itens, edite a aba ITENS da planilha de controle (colunas Código, Categoria, Item de verificação, Etapa limite e, se quiser, Ativo) e carregue a planilha aqui." }),
+      h("p", { class: "meta", style: "margin:0", text: "Cada item é conferido pelo supervisor (planejamento e confirmação com o cliente) ou pelo técnico em campo. Regra padrão: Planejamento, itens com etapa Mobilização e Materiais ficam com o supervisor; os demais (prazo na montagem, testes ou start-up) ficam com o técnico. Use o botão da coluna “Quem confere” para trocar um item." }),
+      h("p", { class: "meta", style: "margin:0", text: "Para mudar os itens, edite a aba ITENS da planilha de controle (Código, Categoria, Item de verificação, Etapa limite e, se quiser, Ativo e Quem confere) e carregue a planilha aqui." }),
+      h("div", { class: "row" }, h("span", { class: "pill p-mob", text: `Supervisor: ${its.filter(i => !ehDoCampo(i)).length} itens` }), h("span", { class: "pill p-ok", text: `Técnico em campo: ${its.filter(ehDoCampo).length} itens` })),
       h("p", { class: "meta", style: "margin:0", text: CENTRAL.url ? "Com a central ligada, a lista vai para todas as obras automaticamente." : "Os links das obras enviados a partir de agora levam esta lista. Obras já enviadas mantêm a lista antiga até você reenviar o link." }),
       D.itensOrigem ? h("p", { class: "meta", style: "margin:0", text: "Última carga: " + D.itensOrigem }) : null,
       h("label", { class: "btn", for: "imp-itens", style: "align-self:flex-start;cursor:pointer" }, "Carregar itens da planilha (Excel)"), inp),
-    h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Nº", "Código", "Item de verificação", "Etapa limite"].map(t => h("th", { text: t })))),
-      h("tbody", {}, (() => { let n = 0; return cats.flatMap(c => [h("tr", {}, h("td", { colspan: "4", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c + " · " + its.filter(i => i.categoria === c).length })),
-        ...its.filter(i => i.categoria === c).map(i => h("tr", {}, h("td", { class: "n", text: ++n }), h("td", {}, h("span", { class: "code", text: i.codigo })), h("td", { text: i.item }), h("td", { text: i.etapa })))]); })())))); }
+    h("div", { class: "tbl" }, h("table", {}, h("thead", {}, h("tr", {}, ["Nº", "Código", "Item de verificação", "Etapa limite", "Quem confere"].map(t => h("th", { text: t })))),
+      h("tbody", {}, (() => { let n = 0; return cats.flatMap(c => [h("tr", {}, h("td", { colspan: "5", style: "background:var(--surface2);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)", text: c + " · " + its.filter(i => i.categoria === c).length })),
+        ...its.filter(i => i.categoria === c).map(i => h("tr", {}, h("td", { class: "n", text: ++n }), h("td", {}, h("span", { class: "code", text: i.codigo })), h("td", { text: i.item }), h("td", { text: i.etapa }),
+          h("td", {}, ehPlanejamento(i) ? h("span", { class: "pill p-mob", text: "Supervisor" })
+            : h("button", { class: "btn sec", style: "padding:5px 10px;font-size:12px;" + (ehDoCampo(i) ? "color:var(--ok);border-color:var(--ok)" : "color:var(--mob);border-color:var(--mob)"), title: "Trocar quem confere",
+                onclick: () => trocarQuem(i) }, ehDoCampo(i) ? "Técnico em campo ⇄" : "Supervisor ⇄"))))]); })())))); }
 
 /* ---------- técnicos ---------- */
 const tecnicos = () => (D.tecnicos || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));

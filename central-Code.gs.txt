@@ -49,7 +49,7 @@ const COL_REG = [
   ["rev", "Análise do item (corrigir / corrigido / aceito)"], ["revObs", "Comentário do supervisor no item"]
 ];
 const COL_ITENS = [["codigo", "Código"], ["categoria", "Categoria"], ["item", "Item de verificação"],
-  ["etapa", "Etapa limite"], ["referencia", "Referência"], ["ativo", "Ativo (Sim/Não)"]];
+  ["etapa", "Etapa limite"], ["referencia", "Referência"], ["ativo", "Ativo (Sim/Não)"], ["quem", "Quem confere (Supervisor/Campo)"]];
 const COL_TEC = [["nome", "Nome do técnico"], ["codigo", "Código pessoal"], ["telefone", "Telefone (WhatsApp)"], ["ativo", "Ativo (Sim/Não)"], ["email", "E-mail"]];
 const COL_SUP = [["nome", "Nome do supervisor"], ["email", "E-mail"], ["sal", "Sal"], ["hash", "Senha (código, não é a senha)"], ["ativo", "Ativo (Sim/Não)"], ["admin", "Administrador (Sim/Não)"]];
 const DATAS = ["dataVerificacao", "previsaoMob", "dataRealMob", "prev", "concl"];
@@ -147,7 +147,7 @@ const abaSup_ = () => aba_("SUPERVISORES", COL_SUP);
 function abaItens_() {
   const sh = aba_("ITENS", COL_ITENS);
   if (sh.getLastRow() < 2) {
-    sh.getRange(2, 1, ITENS_PADRAO.length, 6).setValues(ITENS_PADRAO.map(r => r.concat(["Sim"])));
+    sh.getRange(2, 1, ITENS_PADRAO.length, 7).setValues(ITENS_PADRAO.map(r => r.concat(["Sim", quemPadrao_({ categoria: r[1], etapa: r[3] })])));
     sh.setColumnWidth(3, 420);
   }
   return sh;
@@ -241,10 +241,22 @@ function doPost(e) {
   } finally { lk.releaseLock(); }
 }
 
+// Quem confere o item: Supervisor (planejamento, itens do cliente para a mobilização e materiais) ou Campo (técnico).
+// A coluna "Quem confere" da aba ITENS manda; vazia, vale esta regra.
+function quemPadrao_(i) {
+  const c = norm_(i.categoria), e = norm_(i.etapa || "Mobilização");
+  return (c === "PLANEJAMENTO" || e === "MOBILIZACAO" || c === "MATERIAIS") ? "Supervisor" : "Campo";
+}
+function quem_(i) {
+  const q = norm_(i.quem);
+  if (q === "SUPERVISOR" || q === "CLIENTE") return "Supervisor";
+  if (q === "CAMPO" || q === "TECNICO") return "Campo";
+  return quemPadrao_(i);
+}
 function itens_() {
   return ler_(abaItens_(), COL_ITENS).filter(i => i.codigo).map(i => ({
     codigo: String(i.codigo).trim(), categoria: i.categoria, item: i.item, etapa: i.etapa || "Mobilização",
-    referencia: i.referencia, ativo: ativo_(i.ativo)
+    referencia: i.referencia, ativo: ativo_(i.ativo), quem: quem_(i)
   }));
 }
 
@@ -433,12 +445,12 @@ function salvarTecnico_(t) {
 // Substitui a lista de itens (aba ITENS) pela lista carregada pelo supervisor a partir da planilha.
 // Itens que saíram da lista ficam com Ativo = Não, para não perder o que já foi respondido.
 function salvarListaItens_(lista) {
-  const novos = lista.filter(i => i && i.codigo && i.item).map(i => [String(i.codigo).trim(), limpa_(i.categoria || "Geral", 80), limpa_(i.item, 500), limpa_(i.etapa || "Mobilização", 40), limpa_(i.referencia, 200), i.ativo === false ? "Não" : "Sim"]);
+  const novos = lista.filter(i => i && i.codigo && i.item).map(i => [String(i.codigo).trim(), limpa_(i.categoria || "Geral", 80), limpa_(i.item, 500), limpa_(i.etapa || "Mobilização", 40), limpa_(i.referencia, 200), i.ativo === false ? "Não" : "Sim", quem_(i)]);
   if (!novos.length) return { ok: false, erro: "Lista de itens vazia." };
   const sh = abaItens_(), cods = {};
   novos.forEach(r => cods[r[0]] = true);
   const antigos = ler_(sh, COL_ITENS).filter(i => i.codigo && !cods[String(i.codigo).trim()])
-    .map(i => [String(i.codigo).trim(), i.categoria, i.item, i.etapa, i.referencia, "Não"]);
+    .map(i => [String(i.codigo).trim(), i.categoria, i.item, i.etapa, i.referencia, "Não", quem_(i)]);
   const linhas = novos.concat(antigos);
   if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, COL_ITENS.length).clearContent();
   sh.getRange(2, 1, linhas.length, COL_ITENS.length).setValues(linhas);
@@ -451,7 +463,7 @@ function salvarItens_(mudancas, autor, minhas) {
   atuais.forEach(r => porChave[r.obra + "|" + r.cod] = r);
   const cat = {}; itens_().forEach(i => cat[i.codigo] = i);
   const aceitas = [], ignoradas = [], recusadas = [];
-  const plano = Object.keys(cat).filter(c => cat[c].ativo && norm_(cat[c].categoria) === "PLANEJAMENTO");
+  const doSupervisor = c => !cat[c] || cat[c].quem !== "Campo";   // planejamento e itens do cliente: só o supervisor
   const info = {}; ler_(abaObras_(), COL_OBRAS).forEach(o => { if (o.id) info[o.id] = o; });
   const planejamentoOk = obra => !!(info[obra] && info[obra].liberadoCampo);   // campo liberado só depois da autorização do supervisor
   const enviadas = {}; Object.keys(info).forEach(id => { if (info[id].enviadoCampo) enviadas[id] = true; });
@@ -462,7 +474,7 @@ function salvarItens_(mudancas, autor, minhas) {
     const k = obra + "|" + cod;
     if (minhas) {                                                  // técnico de campo
       if (!minhas[obra]) { recusadas.push(k); return; }          // obra de outro técnico
-      if (plano.indexOf(cod) >= 0) { recusadas.push(k); return; } // planejamento é do supervisor
+      if (doSupervisor(cod)) { recusadas.push(k); return; }        // item conferido pelo supervisor
       if (!planejamentoOk(obra)) { recusadas.push(k); return; }   // campo ainda bloqueado
       if (enviadas[obra]) { recusadas.push(k); return; }          // já enviado ao supervisor: só muda se ele devolver
       if (info[obra] && info[obra].analise === "Devolvido" && marcados[obra] && !marcados[obra][cod]) { recusadas.push(k); return; }
@@ -500,7 +512,7 @@ function enviarChecklist_(obraId, tecnico, minhas) {
   if (!o || !o.liberadoCampo) return { ok: false, erro: "A obra ainda não foi autorizada para o campo." };
   if (o.enviadoCampo) return { ok: true, jaEnviado: true };
   const reg = {}; ler_(abaReg_(), COL_REG).forEach(r => { if (r.obra === id) reg[r.cod] = r; });
-  const campo = itens_().filter(i => i.ativo && norm_(i.categoria) !== "PLANEJAMENTO");
+  const campo = itens_().filter(i => i.ativo && i.quem === "Campo");
   const faltam = campo.filter(i => !(reg[i.codigo] && reg[i.codigo].status)).map(i => i.codigo);
   if (faltam.length) return { ok: false, erro: "Faltam " + faltam.length + " item(ns) sem resposta: " + faltam.join(", ") };
   const incompletos = campo.filter(i => { const r = reg[i.codigo]; return r.status === "Pendente" && (!r.parte || !r.prev || !r.fotos); }).map(i => i.codigo);
