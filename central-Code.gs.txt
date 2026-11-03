@@ -54,6 +54,7 @@ const COL_TEC = [["nome", "Nome do técnico"], ["codigo", "Código pessoal"], ["
 const COL_SUP = [["nome", "Nome do supervisor"], ["email", "E-mail"], ["sal", "Sal"], ["hash", "Senha (código, não é a senha)"], ["ativo", "Ativo (Sim/Não)"], ["admin", "Administrador (Sim/Não)"]];
 const DATAS = ["dataVerificacao", "previsaoMob", "dataRealMob", "prev", "concl"];
 const CARIMBO = ["em", "liberadoCampo", "enviadoCampo", "analiseEm"];
+const CHAVES = ["id", "obra", "cod", "codigo"];   // lidas sempre como texto
 
 const ITENS_PADRAO = [
   ["CIV-01", "Civil", "Bases para os tanques (cotas de nível conforme Guia Civil)", "Mobilização", "Guia Civil"],
@@ -162,6 +163,8 @@ function ler_(sh, cols) {
     cols.forEach((c, j) => {
       let x = v[j];
       if (x instanceof Date) x = CARIMBO.indexOf(c[0]) >= 0 ? x.toISOString() : Utilities.formatDate(x, TZ, "yyyy-MM-dd");
+      // IDs e códigos sempre como texto: a planilha transforma "12345" em número e a obra deixava de ser encontrada
+      if (CHAVES.indexOf(c[0]) >= 0) x = x === null || x === undefined ? "" : String(x).trim();
       o[c[0]] = x === null || x === undefined ? "" : (typeof x === "number" ? x : String(x));
     });
     return o;
@@ -174,6 +177,9 @@ function valor_(k, x) {
   return typeof x === "string" ? limpa_(x) : x;
 }
 function linha_(cols, o) { return cols.map(c => valor_(c[0], o[c[0]])); }
+function textoNasChaves_(sh, cols) {   // garante formato texto nas colunas de ID antes de gravar
+  cols.forEach((c, i) => { if (CHAVES.indexOf(c[0]) >= 0) sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat("@"); });
+}
 
 /* ---------------- técnicos ---------------- */
 function tecnicos_() {
@@ -223,7 +229,8 @@ function doPost(e) {
   }
 
   // App de campo: cada técnico entra com o próprio código e só mexe nas obras dele
-  const tec = tecnicoPorCodigo_(b.codigo);
+  let tec = tecnicoPorCodigo_(b.codigo);
+  if (tec && b.usuario !== undefined && norm_(b.usuario) !== norm_(tec.nome)) tec = null;   // usuário = nome do técnico
   if (b.acao === "ping") return json_({ ok: true, codigoOk: !!tec, tecnico: tec ? tec.nome : "" });
   if (!tec) return json_({ ok: false, erro: "codigo" });
   const minhas = obrasDoTecnico_(tec.nome);
@@ -384,7 +391,9 @@ function carregar_(tecnico, sup) {
 function salvarObra_(n, sup) {
   const sh = abaObras_();
   const id = idObra_(n.id); if (!id) return { ok: false, erro: "Obra sem ID." };
+  juntarRepetidas_(id);
   const velho = ler_(sh, COL_OBRAS).filter(o => o.id === id)[0] || {};
+  if (!velho._linha) textoNasChaves_(sh, COL_OBRAS);
   const quem = sup ? sup.nome : "Supervisor";
   const o = Object.assign({}, velho, n, { id: id, por: quem, em: new Date().toISOString() });
   delete o.liberadoPor; delete o.analisePor; o.liberadoPor = velho.liberadoPor || ""; o.analisePor = velho.analisePor || "";
@@ -400,6 +409,24 @@ function salvarObra_(n, sup) {
   if (decidiu && n.analise === "Devolvido") email_(para, "Checklist devolvido para correção: " + id, ["Olá, " + esc_(o.tecnico) + "!", quem + " devolveu o checklist da obra " + nomeObra_(o) + " para correção.", o.analiseObs ? "Comentário: " + esc_(o.analiseObs) : "", "Abra a aba Corrigir no app, ajuste os itens marcados e envie de novo."].filter(Boolean), APP_CAMPO);
   if (decidiu && n.analise === "Aprovado") email_(para, "Checklist validado: " + id, ["Olá, " + esc_(o.tecnico) + "!", quem + " validou o checklist da obra " + nomeObra_(o) + ". A obra está liberada para mobilização.", o.analiseObs ? "Comentário: " + esc_(o.analiseObs) : ""].filter(Boolean), APP_CAMPO);
   return { ok: true, id: id };
+}
+// Se a mesma obra aparece em várias linhas da aba OBRAS, junta tudo na primeira (vale o último valor preenchido de cada coluna).
+function juntarRepetidas_(id) {
+  const sh = abaObras_(), linhas = ler_(sh, COL_OBRAS).filter(o => o.id === id);
+  if (linhas.length < 2) return 0;
+  const junto = {};
+  linhas.forEach(o => COL_OBRAS.forEach(c => { if (o[c[0]] !== "" && o[c[0]] !== undefined) junto[c[0]] = o[c[0]]; }));
+  junto.id = id;
+  sh.getRange(linhas[0]._linha, 1, 1, COL_OBRAS.length).setValues([linha_(COL_OBRAS, junto)]);
+  linhas.slice(1).map(o => o._linha).sort((a, b) => b - a).forEach(l => sh.deleteRow(l));
+  return linhas.length - 1;
+}
+/* Rode uma vez pelo editor: junta as obras repetidas e acerta o formato texto dos IDs. */
+function repararObras() {
+  const sh = abaObras_(); textoNasChaves_(sh, COL_OBRAS); textoNasChaves_(abaReg_(), COL_REG);
+  const ids = ler_(sh, COL_OBRAS).map(o => o.id).filter((x, i, a) => x && a.indexOf(x) === i);
+  let n = 0; ids.forEach(id => n += juntarRepetidas_(id));
+  Logger.log("Linhas repetidas juntadas: " + n + ". Obras: " + JSON.stringify(ler_(sh, COL_OBRAS).map(o => ({ id: o.id, tecnico: o.tecnico, autorizado: o.liberadoCampo }))));
 }
 function limparCorrigidos_(obra) {
   const sh = abaReg_(), iRev = COL_REG.map(c => c[0]).indexOf("rev") + 1;
@@ -496,7 +523,7 @@ function salvarItens_(mudancas, autor, minhas) {
       revObs: minhas ? (velho ? velho.revObs : "") : (d.revObs !== undefined ? d.revObs : (velho ? velho.revObs : ""))
     };
     if (velho) sh.getRange(velho._linha, 1, 1, COL_REG.length).setValues([linha_(COL_REG, r)]);
-    else { sh.appendRow(linha_(COL_REG, r)); porChave[k] = { _linha: sh.getLastRow(), em: r.em, status: r.status, rev: r.rev, revObs: r.revObs }; }
+    else { if (!atuais.length && !porChave._fmt) { textoNasChaves_(sh, COL_REG); porChave._fmt = true; } sh.appendRow(linha_(COL_REG, r)); porChave[k] = { _linha: sh.getLastRow(), em: r.em, status: r.status, rev: r.rev, revObs: r.revObs }; }
     if (porChave[k]) { porChave[k].rev = r.rev; porChave[k].revObs = r.revObs; }
     if (porChave[k]) porChave[k].status = r.status;
     aceitas.push(k);

@@ -700,7 +700,7 @@ function telaTecnicos() {
     h("label", { class: "f" }, "Senha de acesso (digite ou use a sugerida, 4 a 8 números)", h("input", { id: "t-cod", required: true, inputmode: "numeric", value: novoCodigo(), maxlength: "8", autocomplete: "off" })),
     h("div", { class: "row", style: "align-items:flex-end" }, h("button", { class: "btn", type: "submit" }, "Cadastrar técnico"), msg));
   const linhas = tecnicos().map(t => { const n = Object.values(D.obras).filter(o => o.tecnico === t.nome && !encerrada(o)).length;
-    const txt = `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nSenha de acesso: ${t.codigo}\nNão compartilhe esta senha.`;
+    const txt = `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nUsuário: ${t.nome}\nSenha: ${t.codigo}\nNão compartilhe esta senha.`;
     const exc = h("button", { class: "btn sec", style: "padding:7px 10px;font-size:12px;color:var(--bad);border-color:var(--bad)" }, "Excluir");
     exc.onclick = async () => { if (!exc.classList.contains("arm")) { exc.classList.add("arm"); exc.textContent = "Confirmar exclusão"; setTimeout(() => { if (exc.isConnected) { exc.classList.remove("arm"); exc.textContent = "Excluir"; } }, 4000); return; }
       try { await api({ acao: "supExcluirTecnico", nome: t.nome }); toast("Técnico excluído"); await carregarCentral(); } catch (e) { UI.erro = e.message; render(); } };
@@ -766,11 +766,11 @@ function blocoLink(o) {
   if (UI.link !== o.id) return null;
   const t = tecnicoDe(o.tecnico);
   if (CENTRAL.url) {   // com a central, a obra aparece sozinha para o técnico ao entrar com a senha
-    const txt = t ? `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nSenha de acesso: ${t.codigo}\nAo entrar, as obras liberadas para você já aparecem.` : "";
+    const txt = t ? `Olá, ${t.nome}! Seu acesso ao Checklist de Pré-Instalação ECTAS:\n${APP_CAMPO}\nUsuário: ${t.nome}\nSenha: ${t.codigo}\nAo entrar, as obras liberadas para você já aparecem.` : "";
     return h("div", { class: "card", style: "display:flex;flex-direction:column;gap:8px;border-color:var(--teal)" },
       h("b", { text: "Obra liberada para " + (t ? t.nome : "o técnico") }),
-      h("p", { class: "meta", style: "margin:0", text: "Não precisa enviar link: quando o técnico entrar no app com a senha dele, o checklist desta obra já aparece." }),
-      t ? h("div", { class: "row" }, h("span", { class: "meta", text: "Endereço do app: " + APP_CAMPO + " · Senha de acesso:" }), h("span", { class: "code", style: "font-size:20px", text: t.codigo })) : null,
+      h("p", { class: "meta", style: "margin:0", text: "Não precisa enviar link: quando o técnico entrar no app com o usuário (nome dele) e a senha, o checklist desta obra já aparece." }),
+      t ? h("div", { class: "row" }, h("span", { class: "meta", text: "Endereço do app: " + APP_CAMPO + " · Usuário: " + t.nome + " · Senha:" }), h("span", { class: "code", style: "font-size:20px", text: t.codigo })) : null,
       t ? h("a", { class: "btn sec", style: "align-self:flex-start", href: "https://wa.me/" + foneWa(t) + "?text=" + encodeURIComponent(txt), target: "_blank", rel: "noopener" }, "Enviar a senha ao técnico (só no primeiro acesso)") : null); }
   const inp = h("input", { class: "busca", id: "link-obra", readonly: true, value: "Gerando o link…", onfocus: e => e.target.select() });
   const wa = h("a", { class: "btn wa", target: "_blank", rel: "noopener" }, "Enviar no WhatsApp para " + (t ? t.nome : ""));

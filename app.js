@@ -90,7 +90,7 @@ function alterarObra(id, dados) {
 async function api(corpo) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 45000);
   try {
-    const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...corpo, codigo: C.codigo, autor: C.autor }), signal: ctl.signal });
+    const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...corpo, codigo: C.codigo, autor: C.autor, usuario: C.usuario || C.autor }), signal: ctl.signal });
     const j = await r.json();
     if (!j.ok && j.erro === "codigo") { const e = new Error("codigo"); e.codigo = true; throw e; }
     if (!j.ok) throw new Error(j.erro || "erro da central");
@@ -178,20 +178,21 @@ function telaEntrada() {
   const msg = h("p", { class: "meta", id: "ent-msg" });
   const f = h("form", { class: "card ent", onsubmit: async e => { e.preventDefault();
       const cod = $("#e-cod").value.trim(), nomeEl = $("#e-nome"), nome = nomeEl ? nomeEl.value.trim() : "";
+      if (!nome) { msg.textContent = "Digite o seu usuário (seu nome, como o supervisor cadastrou)."; return; }
       if (!/^\d{4,8}$/.test(cod)) { msg.textContent = "A senha tem de 4 a 8 números."; return; }
       let autor = nome;
       if (CENTRAL.url) { msg.textContent = "Conferindo a senha…";
-        try { const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ acao: "ping", codigo: cod }) }).then(x => x.json());
-          if (!r.codigoOk) { msg.textContent = "Senha não encontrada. Confira com o supervisor."; return; }
+        try { const r = await fetch(CENTRAL.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ acao: "ping", codigo: cod, usuario: nome }) }).then(x => x.json());
+          if (!r.codigoOk) { msg.textContent = "Usuário ou senha incorretos. Confira com o supervisor."; return; }
           autor = r.tecnico;
         } catch (err) { msg.textContent = "Sem internet agora. Conecte-se para entrar pela primeira vez."; return; } }
       else if (!nome) { msg.textContent = "Digite o seu nome."; return; }
       if (C.codigo !== cod) { E = { obras: {}, itens: E.itens, ultimaSync: null, planilha: "" }; salvarE(); }
       const destino = UI.rota.v === "obra" ? "obra-" + UI.rota.id : "";   // link de obra aberto antes de entrar
-      C = { codigo: cod, autor }; salvarC(); UI.abrirUnica = !destino; ir(destino); processarLink(); sincronizar(); } },
+      C = { codigo: cod, autor, usuario: nome }; salvarC(); UI.abrirUnica = !destino; ir(destino); processarLink(); sincronizar(); } },
     h("h2", { text: "Acesso do técnico" }),
-    h("p", { class: "meta", text: "Digite a senha de acesso que o supervisor enviou para você. Você vai ver só as obras liberadas para você." }),
-    CENTRAL.url ? null : h("label", { class: "f" }, "Seu nome", h("input", { id: "e-nome", required: true, autocomplete: "name", value: C.autor || "" })),
+    h("p", { class: "meta", text: "Entre com o seu usuário (seu nome) e a senha que o supervisor enviou. Você vai ver só as obras liberadas para você." }),
+    h("label", { class: "f" }, "Usuário (seu nome)", h("input", { id: "e-nome", required: true, autocomplete: "username", autocapitalize: "words", value: C.usuario || C.autor || "", placeholder: "Nome cadastrado pelo supervisor" })),
     h("label", { class: "f" }, "Senha de acesso", h("input", { id: "e-cod", type: "password", required: true, inputmode: "numeric", autocomplete: "off", maxlength: "8", pattern: "[0-9]*" })),
     h("button", { class: "btn", type: "submit" }, "Entrar"), msg);
   $("#main").replaceChildren(f); }
